@@ -11,8 +11,7 @@ import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class TpaHereClient implements ClientModInitializer {
-    private static final KeyBinding.Category CATEGORY =
-            KeyBinding.Category.create(Identifier.of("bilal_utility", "main"));
+    private static final KeyBinding.Category CATEGORY = com.bilalutility.BilalKeys.CATEGORY;
     private static KeyBinding openKey;
     private static KeyBinding cancelKey;
     private static KeyBinding settingsKey;

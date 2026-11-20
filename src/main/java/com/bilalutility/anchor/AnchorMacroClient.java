@@ -37,8 +37,7 @@ import org.lwjgl.glfw.GLFW;
  * inventory, but then keep one hotbar slot empty). The explosion is strong and hurts you too.
  */
 public class AnchorMacroClient implements ClientModInitializer {
-    private static final KeyBinding.Category CATEGORY =
-            KeyBinding.Category.create(Identifier.of("bilal_utility", "main"));
+    private static final KeyBinding.Category CATEGORY = com.bilalutility.BilalKeys.CATEGORY;
     private static final int STEP_DELAY = 1;   // ticks between steps (20 ticks = 1 second)
     private static final int CHAIN_GAP = 4;    // ticks between two anchors while the key is held
     private static final int MAX_WAIT = 10;    // ticks to wait for the server before giving up

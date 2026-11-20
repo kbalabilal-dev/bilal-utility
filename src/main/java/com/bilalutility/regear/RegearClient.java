@@ -12,8 +12,7 @@ import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class RegearClient implements ClientModInitializer {
-    private static final KeyBinding.Category CATEGORY =
-            KeyBinding.Category.create(Identifier.of("bilal_utility", "main"));
+    private static final KeyBinding.Category CATEGORY = com.bilalutility.BilalKeys.CATEGORY;
     private static KeyBinding startKey;
     private static KeyBinding pauseKey;
     private static KeyBinding settingsKey;
