@@ -8,5 +8,7 @@
   "key.tpahere.pause": "Pause / resume TPAHere queue",
   "key.tpahere.autohit": "Toggle TPAHere auto hit",
   "key.tpahere.settings": "Open TPAHere settings",
+  "key.bilalhud.toggle": "Toggle HUD",
+  "key.bilalhud.settings": "Open HUD settings",
   "key.category.bilal_utility.main": "Bilal Utility"
 }

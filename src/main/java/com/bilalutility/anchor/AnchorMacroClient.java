@@ -38,9 +38,6 @@ import org.lwjgl.glfw.GLFW;
  */
 public class AnchorMacroClient implements ClientModInitializer {
     private static final KeyBinding.Category CATEGORY = com.bilalutility.BilalKeys.CATEGORY;
-    private static final int STEP_DELAY = 1;   // ticks between steps (20 ticks = 1 second)
-    private static final int CHAIN_GAP = 4;    // ticks between two anchors while the key is held
-    private static final int MAX_WAIT = 10;    // ticks to wait for the server before giving up
 
     private static KeyBinding runKey;
 
@@ -55,6 +52,7 @@ public class AnchorMacroClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        AnchorConfig.load();
         runKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.anchormacro.run", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, CATEGORY));
         ClientTickEvents.END_CLIENT_TICK.register(AnchorMacroClient::tick);
@@ -125,6 +123,16 @@ public class AnchorMacroClient implements ClientModInitializer {
         return target;
     }
 
+    /**
+     * Safety rule: a totem must be in the OFFHAND before an anchor is blown. The totem in your main
+     * hand (used to detonate) is the one that pops first; the offhand totem is the one that saves you
+     * if anything goes wrong. Can be switched off in the settings.
+     */
+    private static boolean offhandTotemOk(MinecraftClient client) {
+        return !AnchorConfig.requireOffhandTotem
+                || client.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+    }
+
     private static void select(MinecraftClient client, int slot) {
         if (slot >= 0) client.player.getInventory().setSelectedSlot(slot);
     }
@@ -180,6 +188,10 @@ public class AnchorMacroClient implements ClientModInitializer {
         }
         if (glowSlot < 0) {
             msg(client, "Anchor macro: no glowstone in your hotbar");
+            return;
+        }
+        if (!offhandTotemOk(client)) {
+            msg(client, "Anchor macro: no totem in your offhand, not blowing the anchor");
             return;
         }
         // Make sure a totem is ready BEFORE this anchor goes off.
@@ -238,14 +250,14 @@ public class AnchorMacroClient implements ClientModInitializer {
                 client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, placeHit);
                 client.player.swingHand(Hand.MAIN_HAND);
                 step = 1;
-                wait = 2;
+                wait = AnchorConfig.placeWaitTicks;
                 timeout = 0;
             }
             case 1 -> { // charge it with glowstone
                 if (anchorPos == null) {
                     anchorPos = anchorAt(client, placeHit);
                     if (anchorPos == null) {
-                        if (++timeout > MAX_WAIT) abort(client, "couldn't place the anchor");
+                        if (++timeout > AnchorConfig.maxWaitTicks) abort(client, "couldn't place the anchor");
                         return;
                     }
                     timeout = 0;
@@ -253,7 +265,7 @@ public class AnchorMacroClient implements ClientModInitializer {
                 select(client, glowSlot);
                 interactAt(client, anchorPos);
                 step = 2;
-                wait = STEP_DELAY;
+                wait = AnchorConfig.stepDelayTicks;
                 timeout = 0;
             }
             case 2 -> { // wait for the charge, check the totem, then detonate
@@ -263,7 +275,7 @@ public class AnchorMacroClient implements ClientModInitializer {
                     return;
                 }
                 if (s.get(RespawnAnchorBlock.CHARGES) < 1) {
-                    if (++timeout > MAX_WAIT) abort(client, "the anchor didn't charge");
+                    if (++timeout > AnchorConfig.maxWaitTicks) abort(client, "the anchor didn't charge");
                     return;
                 }
                 // If the totem popped since the last explosion, replace it now.
@@ -273,15 +285,19 @@ public class AnchorMacroClient implements ClientModInitializer {
                     return;
                 }
                 totemSlot = ready;
+                if (!offhandTotemOk(client)) {
+                    abort(client, "no totem in your offhand, not blowing the anchor");
+                    return;
+                }
                 select(client, totemSlot);
                 interactAt(client, anchorPos);
                 step = 3;
-                wait = STEP_DELAY;
+                wait = AnchorConfig.stepDelayTicks;
             }
             case 3 -> { // back to the slot you had; continue if the key is still held
                 select(client, origSlot);
                 step = -1;
-                if (runKey.isPressed()) chainWait = CHAIN_GAP;
+                if (runKey.isPressed()) chainWait = AnchorConfig.chainGapTicks;
             }
             default -> step = -1;
         }
