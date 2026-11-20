@@ -1,0 +1,12 @@
+{
+  "key.anchormacro.run": "Anchor macro (tap = one anchor, hold = keep going)",
+  "key.regear.start": "Start / stop auto regear",
+  "key.regear.pause": "Pause / resume auto regear",
+  "key.regear.settings": "Open Auto Regear settings",
+  "key.tpahere.open": "Open TPAHere picker (press again to stop a queue)",
+  "key.tpahere.cancel": "Cancel TPAHere queue",
+  "key.tpahere.pause": "Pause / resume TPAHere queue",
+  "key.tpahere.autohit": "Toggle TPAHere auto hit",
+  "key.tpahere.settings": "Open TPAHere settings",
+  "key.category.bilal_utility.main": "Bilal Utility"
+}
