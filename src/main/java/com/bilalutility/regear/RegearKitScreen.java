@@ -64,7 +64,7 @@ public class RegearKitScreen extends BilalScreen {
 
         if (kits.isEmpty()) {
             centered("No saved kits yet.", listTop + 18, 0xFFAAAAAA);
-            centered("Edit your setup, then save it below.", listTop + 33, 0xFF888899);
+            centered("Type a name below and tap New kit.", listTop + 33, 0xFF888899);
         }
 
         int ry = height - 56;
@@ -76,16 +76,16 @@ public class RegearKitScreen extends BilalScreen {
             if (saveBtn != null) saveBtn.active = RegearKits.canSave(s);
         });
         addDrawableChild(nameField);
-        saveBtn = button("Save", left + inner - 106, ry, 106, () -> {
+        saveBtn = button("New kit", left + inner - 106, ry, 106, () -> {
             if (RegearKits.saveCurrent(nameField.getText())) {
                 nameField.setText("");
                 clearAndInit();
             }
-        }, "Save the current item amounts and hotbar layout");
+        }, "Creates a kit from what is set up right now");
         saveBtn.active = RegearKits.canSave(old);
 
-        button("Edit items", left, height - 30, 90, () -> client.setScreen(new RegearKitEditScreen(this)),
-                "Configure item amounts and hotbar slots");
+        button("Edit kit", left, height - 30, 90, () -> client.setScreen(new RegearConfigScreen(this)),
+                "Items, amounts and hotbar of the loaded kit");
         button("Done", centerX() - 45, height - 30, 90, this::close, null);
         ButtonWidget buy = button("Buy now", left + inner - 90, height - 30, 90, () -> {
             client.setScreen(null);

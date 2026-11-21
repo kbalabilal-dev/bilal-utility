@@ -107,7 +107,14 @@ public class EndCityFinderScreen extends BilalScreen {
         cancelButton.active = EndCityScanner.isRunning();
 
         dynamic(EndCityScanner::status, left, actionY + (compact ? 20 : 22), inner, 0xFFFFCC66);
-        setHint("");
+
+        int toolsY = actionY + (compact ? 34 : 38);
+        ButtonWidget verifyButton = button("Test filter", left, toolsY, buttonW, this::startVerify,
+                "Checks the fast filter against vanilla on a small area (about 20 seconds)");
+        verifyButton.active = !EndCityScanner.isRunning();
+        toggle(left + buttonW + gap, toolsY, buttonW, "Fast filter", EndCityScanner::useFilter,
+                EndCityScanner::setUseFilter, () -> {}, "ON = much faster. OFF = every spot checked by vanilla (slow, always exact)");
+        setHint("Tip: scan radius must be bigger than the ignore radius, or nothing is found");
     }
 
     private void useCurrentEndPosition() {
@@ -138,6 +145,15 @@ public class EndCityFinderScreen extends BilalScreen {
         return field;
     }
 
+    private void startVerify() {
+        try {
+            EndCityScanner.startVerify(client, Long.parseLong(seedField.getText().trim()));
+            clearAndInit();
+        } catch (NumberFormatException exception) {
+            if (client.player != null) client.player.sendMessage(Text.literal("Enter a valid numeric seed first."), true);
+        }
+    }
+
     private void startScan() {
         try {
             long seed = Long.parseLong(seedField.getText().trim());
@@ -149,6 +165,11 @@ public class EndCityFinderScreen extends BilalScreen {
             EndCityFinderConfig.centerX = EndCityFinderConfig.clamp(Integer.parseInt(centerXField.getText().trim()), -30_000_000, 30_000_000);
             EndCityFinderConfig.centerZ = EndCityFinderConfig.clamp(Integer.parseInt(centerZField.getText().trim()), -30_000_000, 30_000_000);
             EndCityFinderConfig.save();
+            if (EndCityFinderConfig.scanRadius <= EndCityFinderConfig.ignoreSpawnRadius) {
+                if (client.player != null) client.player.sendMessage(Text.literal(
+                        "Scan radius must be bigger than the ignore radius (" + EndCityFinderConfig.ignoreSpawnRadius + ")"), true);
+                return;
+            }
             boolean started = EndCityScanner.start(client, seed, EndCityFinderConfig.centerX, EndCityFinderConfig.centerZ,
                     EndCityFinderConfig.scanRadius, EndCityFinderConfig.ignoreSpawnRadius);
             if (!started && client.player != null) {

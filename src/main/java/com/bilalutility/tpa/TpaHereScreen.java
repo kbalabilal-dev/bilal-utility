@@ -15,8 +15,7 @@ import java.util.Set;
 
 public class TpaHereScreen extends BilalScreen {
     private static final int ROW_H = 24;
-    private static final int RESERVED_SINGLE = 40;
-    private static final int RESERVED_MULTI = 88;
+    private static final int RESERVED = 40;
 
     // Remembered between openings of the screen.
     private static boolean autoRepeat = false;
@@ -49,7 +48,7 @@ public class TpaHereScreen extends BilalScreen {
         int left = panelLeft() + 12;
         int cx = centerX();
         int y = contentTop();
-        top = y + 28;
+        top = y + (multi ? 52 : 28);   // multi mode shows a second row of buttons under the search
 
         button("Settings", left, y, 60, () -> client.setScreen(new TpaConfigScreen(this)), "Open the TPAHere settings");
 
@@ -62,25 +61,27 @@ public class TpaHereScreen extends BilalScreen {
         multiBtn = toggleButton(left + 194, y, 58, "Multi", () -> multi, () -> {
             multi = !multi;
             if (!multi) selected.clear();
-            rebuild();
+            clearAndInit();
         }, "Select several players and send them as a queue");
 
-        selPageBtn = button("Select page", left + 1, height - 78, 100, () -> {
+        int row2 = y + 24;
+        int bw = (panelW() - 24 - 9) / 4;
+        selPageBtn = button("Select page", left, row2, bw, () -> {
             List<String> l = selectable(pageNames);
             if (allSelected(l)) selected.removeAll(l); else selected.addAll(l);
             rebuild();
         }, null);
-        selAllBtn = button("Select all", left + 108, height - 78, 100, () -> {
+        selAllBtn = button("Select all", left + (bw + 3), row2, bw, () -> {
             List<String> l = selectable(filtered);
             if (allSelected(l)) selected.removeAll(l); else selected.addAll(l);
             rebuild();
         }, null);
 
-        autoBtn = button(autoLabel(), left + 1, height - 54, 84, () -> {
+        autoBtn = button(autoLabel(), left + 2 * (bw + 3), row2, bw, () -> {
             autoRepeat = !autoRepeat;
             autoBtn.setMessage(Text.literal(autoLabel()));
         }, "Start a new round when the queue ends");
-        sendBtn = button(sendLabel(), left + 92, height - 54, 224, this::sendSelected, null);
+        sendBtn = button(sendLabel(), left + 3 * (bw + 3), row2, bw, this::sendSelected, null);
 
         prev = button("<", cx - 104, height - 30, 44, () -> { page--; rebuild(); }, null);
         next = button(">", cx + 60, height - 30, 44, () -> { page++; rebuild(); }, null);
@@ -140,8 +141,7 @@ public class TpaHereScreen extends BilalScreen {
         filtered = new ArrayList<>(TpaQueue.onlineNames(client, search.getText()));
         empty = filtered.isEmpty();
 
-        int reserved = multi ? RESERVED_MULTI : RESERVED_SINGLE;
-        int rows = Math.max(1, (height - top - reserved) / ROW_H);
+        int rows = Math.max(1, (height - top - RESERVED) / ROW_H);
         perPage = rows * 3;
         maxPage = Math.max(0, (filtered.size() - 1) / perPage);
         page = MathHelper.clamp(page, 0, maxPage);
@@ -193,7 +193,7 @@ public class TpaHereScreen extends BilalScreen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        int listBottom = height - (multi ? RESERVED_MULTI : RESERVED_SINGLE);
+        int listBottom = height - RESERVED;
         if (mouseX >= panelLeft() && mouseX <= panelRight()
                 && mouseY >= top && mouseY <= listBottom && maxPage > 0) {
             int nextPage = MathHelper.clamp(page - (int) Math.signum(verticalAmount), 0, maxPage);
@@ -232,7 +232,7 @@ public class TpaHereScreen extends BilalScreen {
         if (maxPage > 0) {
             int trackX = panelRight() - 7;
             int trackTop = top;
-            int trackBottom = height - (multi ? RESERVED_MULTI : RESERVED_SINGLE);
+            int trackBottom = height - RESERVED;
             int trackHeight = Math.max(1, trackBottom - trackTop);
             int thumbHeight = Math.max(12, trackHeight / (maxPage + 1));
             int thumbY = trackTop + (trackHeight - thumbHeight) * page / maxPage;

@@ -8,17 +8,14 @@ import net.minecraft.text.Text;
 
 import java.util.Locale;
 
+/** One simple page: the few things that matter first, the rest below. */
 public class TpaConfigScreen extends BilalScreen {
-    private static final String[] TABS = {"Timing", "Options", "Progress box"};
     private static final String[] HUD_NAMES = {"off", "top center", "top left", "top right"};
-    private static int lastPage = 0;
 
-    private int page;
     private ButtonWidget pauseBtn;
 
     public TpaConfigScreen(Screen parent) {
-        super("TPAHere settings", "Queued /tpahere with combat detection", 0x3FA9FF, parent);
-        this.page = lastPage;
+        super("TPAHere", "Queued /tpahere with combat detection", 0x3FA9FF, parent);
     }
 
     private static String secs(int ticks) {
@@ -27,64 +24,19 @@ public class TpaConfigScreen extends BilalScreen {
 
     @Override
     protected void build() {
-        lastPage = page;
-        int left = panelLeft() + 12;
-        int inner = panelW() - 24;
-        int y = contentTop();
-
-        int tw = (inner - 6) / 3;
-        for (int i = 0; i < TABS.length; i++) {
-            int idx = i;
-            ButtonWidget b = button(TABS[i], left + i * (tw + 3), y, tw, () -> {
-                page = idx;
-                clearAndInit();
-            }, null);
-            b.active = i != page;
-        }
-        y += 28;
-        if (page == 0) timing(y); else if (page == 1) options(y); else hudBox(y);
-    }
-
-    private void timing(int y) {
-        section("Timing", y);
-        y += 12;
-        stepper(y, "Delay", () -> TpaConfig.delayTicks, v -> TpaConfig.delayTicks = v, 2, 100, 2, 10,
-                TpaConfigScreen::secs, TpaConfig::save, "Pause between players");
-        stepper(y + 22, "Skip wait", () -> TpaConfig.windowTimeoutTicks, v -> TpaConfig.windowTimeoutTicks = v,
-                10, 100, 2, 10, TpaConfigScreen::secs, TpaConfig::save, "How long to wait for the confirm window");
-        stepper(y + 44, "Round pause", () -> TpaConfig.roundPauseTicks, v -> TpaConfig.roundPauseTicks = v,
-                10, 600, 10, 100, TpaConfigScreen::secs, TpaConfig::save, "Pause before a new round (auto mode)");
-        stepper(y + 66, "Auto hit", () -> TpaConfig.autoHitDelayMs, v -> TpaConfig.autoHitDelayMs = v,
-                50, 5000, 50, 100, v -> v + " ms", TpaConfig::save, "Right click once every X milliseconds");
-        stepper(y + 88, "Max rounds", () -> TpaConfig.maxRounds, v -> TpaConfig.maxRounds = v,
-                0, 999, 1, 5, v -> v == 0 ? "endless" : v + " rounds", TpaConfig::save,
-                "Auto repeat stops after this many rounds");
-    }
-
-    private void options(int y) {
         int left = panelLeft() + 12;
         int inner = panelW() - 24;
         int half = (inner - 4) / 2;
+        int y = contentTop();
 
-        section("Command", y);
-        y += 12;
-        TextFieldWidget field = new TextFieldWidget(textRenderer, left, y, inner, 20, Text.literal("Command"));
-        field.setMaxLength(40);
-        field.setText(TpaConfig.command);
-        field.setChangedListener(s -> {
-            TpaConfig.command = TpaConfig.cleanCommand(s);
-            TpaConfig.save();
-        });
-        addDrawableChild(field);
-        dynamic(() -> "sends  /" + TpaConfig.command + " <player>", left, y + 30, inner, 0xFF9A9AA8);
-
-        y += 50;
-        section("Behaviour", y);
-        y += 12;
-        toggle(left, y, half, "Confirm window", () -> !TpaConfig.hideWindow, v -> TpaConfig.hideWindow = !v,
+        // ---- basics ----
+        stepper(y, "Delay", () -> TpaConfig.delayTicks, v -> TpaConfig.delayTicks = v, 2, 100, 2, 10,
+                TpaConfigScreen::secs, TpaConfig::save, "Pause between players");
+        y += 22;
+        toggle(left, y, half, "Combat pause", () -> TpaConfig.combatPause, v -> TpaConfig.combatPause = v,
+                TpaConfig::save, "Hold the queue while 'Combat: Xs' shows");
+        toggle(left + half + 4, y, half, "Confirm window", () -> !TpaConfig.hideWindow, v -> TpaConfig.hideWindow = !v,
                 TpaConfig::save, "ON = you see the confirm window, OFF = it is clicked without being shown");
-        toggle(left + half + 4, y, half, "Combat pause", () -> TpaConfig.combatPause,
-                v -> TpaConfig.combatPause = v, TpaConfig::save, "Hold the queue while 'Combat: Xs' shows");
         y += 22;
         button("Skip list (" + TpaConfig.skipCount() + ")", left, y, half,
                 () -> client.setScreen(new TpaSkipScreen(this)), "Players that are never sent a request");
@@ -94,29 +46,52 @@ public class TpaConfigScreen extends BilalScreen {
         }, null);
         pauseBtn.active = TpaQueue.isRunning();
 
-        dynamic(() -> "Requests sent, all time: " + TpaConfig.totalSent, left, y + 40, inner, 0xFFFFCC66);
-    }
+        // ---- more ----
+        y += 34;
+        section("More", y);
+        y += 12;
+        label("Command (without the /)", left, y + 6, 0xFFFFFFFF);
+        y += 18;
+        TextFieldWidget field = new TextFieldWidget(textRenderer, left, y, inner, 20, Text.literal("Command"));
+        field.setMaxLength(40);
+        field.setText(TpaConfig.command);
+        field.setChangedListener(s -> {
+            TpaConfig.command = TpaConfig.cleanCommand(s);
+            TpaConfig.save();
+        });
+        addDrawableChild(field);
+        y += 26;
+        stepper(y, "Skip wait", () -> TpaConfig.windowTimeoutTicks, v -> TpaConfig.windowTimeoutTicks = v,
+                10, 100, 2, 10, TpaConfigScreen::secs, TpaConfig::save, "How long to wait for the confirm window");
+        y += 22;
+        stepper(y, "Round pause", () -> TpaConfig.roundPauseTicks, v -> TpaConfig.roundPauseTicks = v,
+                10, 600, 10, 100, TpaConfigScreen::secs, TpaConfig::save, "Pause before a new round (auto mode)");
+        y += 22;
+        stepper(y, "Max rounds", () -> TpaConfig.maxRounds, v -> TpaConfig.maxRounds = v,
+                0, 999, 1, 5, v -> v == 0 ? "endless" : v + " rounds", TpaConfig::save,
+                "Auto repeat stops after this many rounds");
+        y += 22;
+        stepper(y, "Auto hit", () -> TpaConfig.autoHitDelayMs, v -> TpaConfig.autoHitDelayMs = v,
+                50, 5000, 50, 100, v -> v + " ms", TpaConfig::save, "Right click once every X milliseconds");
 
-    private void hudBox(int y) {
-        int left = panelLeft() + 12;
+        // ---- progress box ----
+        y += 34;
         section("Progress box", y);
         y += 12;
-        cycle(left, y, panelW() - 24, "Position", 4, () -> TpaConfig.hudPos, v -> TpaConfig.hudPos = v,
+        cycle(left, y, inner, "Position", 4, () -> TpaConfig.hudPos, v -> TpaConfig.hudPos = v,
                 v -> HUD_NAMES[v], TpaConfig::save, "Where the box shows while a queue runs");
-        y += 30;
+        y += 24;
         stepper(y, "Size", () -> TpaConfig.hudScale, v -> TpaConfig.hudScale = v, 50, 200, 5, 25,
                 v -> v + "%", TpaConfig::save, null);
-        stepper(y + 22, "Move X", () -> TpaConfig.hudX, v -> TpaConfig.hudX = v, -600, 600, 1, 10,
+        y += 22;
+        stepper(y, "Move X", () -> TpaConfig.hudX, v -> TpaConfig.hudX = v, -600, 600, 1, 10,
                 v -> v + " px", TpaConfig::save, null);
-        stepper(y + 44, "Move Y", () -> TpaConfig.hudY, v -> TpaConfig.hudY = v, -600, 600, 1, 10,
+        y += 22;
+        stepper(y, "Move Y", () -> TpaConfig.hudY, v -> TpaConfig.hudY = v, -600, 600, 1, 10,
                 v -> v + " px", TpaConfig::save, null);
-        button("Reset box", left, y + 76, panelW() - 24, () -> {
-            TpaConfig.hudScale = 100;
-            TpaConfig.hudX = 0;
-            TpaConfig.hudY = 0;
-            TpaConfig.save();
-            clearAndInit();
-        }, null);
+
+        dynamic(() -> "Requests sent, all time: " + TpaConfig.totalSent, left, y + 30, inner, 0xFF9A9AA8);
+        setHint("Everything saves by itself");
     }
 
     @Override

@@ -1,7 +1,6 @@
 package com.bilalutility.regear;
 
 import com.bilalutility.ui.BilalScreen;
-import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -13,18 +12,12 @@ import java.util.Locale;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
+/** One simple page: run it, say how many of each item to buy, and (optionally) open the shop setup. */
 public class RegearConfigScreen extends BilalScreen {
-    private static final String[] TABS = {"Kit", "Shop", "Progress box"};
-    private static final String[] HUD_NAMES = {"off", "top center", "top left", "top right"};
-    private static int lastPage = 0;
-
-    private int page;
-    private int cardY;
     private ButtonWidget startBtn, pauseBtn;
 
     public RegearConfigScreen(Screen parent) {
-        super("Auto Regear", "Buys your kit from the server shop", 0x55FF55, parent);
-        this.page = lastPage;
+        super("Auto Regear", "Buys your items from the server shop", 0x55FF55, parent);
     }
 
     private static String secs(int ticks) {
@@ -32,7 +25,7 @@ public class RegearConfigScreen extends BilalScreen {
     }
 
     private static String startLabel() {
-        return RegearRunner.isRunning() ? "Stop regear" : "Start regear";
+        return RegearRunner.isRunning() ? "Stop" : "Start regear";
     }
 
     private static String pauseLabel() {
@@ -41,47 +34,12 @@ public class RegearConfigScreen extends BilalScreen {
 
     @Override
     protected void build() {
-        lastPage = page;
-        int left = panelLeft() + 12;
-        int inner = panelW() - 24;
-        int y = contentTop();
-
-        int tw = (inner - 6) / 3;
-        for (int i = 0; i < TABS.length; i++) {
-            int idx = i;
-            ButtonWidget b = button(TABS[i], left + i * (tw + 3), y, tw, () -> {
-                page = idx;
-                clearAndInit();
-            }, null);
-            b.active = i != page;
-        }
-        y += 28;
-        if (page == 0) kitPage(y); else if (page == 1) shopPage(y); else hudPage(y);
-    }
-
-    private void kitPage(int y) {
         int left = panelLeft() + 12;
         int inner = panelW() - 24;
         int half = (inner - 4) / 2;
+        int y = contentTop();
 
-        cardY = y;   // the "current kit" card is drawn here (46 px high)
-        y += 52;
-
-        button("Choose a kit...", left, y, half, () -> client.setScreen(new RegearKitScreen(this)),
-                "Premade kits and your saved kits, with icons");
-        button("Edit items...", left + half + 4, y, half, () -> client.setScreen(new RegearKitEditScreen(this)),
-                "Amount and shop slot of every item");
-        y += 22;
-        button("Hotbar & offhand...", left, y, half, () -> client.setScreen(new RegearSortScreen(this)),
-                "Where the regear puts your items after buying");
-        button("Sort only", left + half + 4, y, half, () -> {
-            client.setScreen(null);
-            RegearRunner.sortOnly(client);
-        }, "Arrange hotbar and offhand now, without buying anything");
-
-        y += 30;
-        section("Run", y);
-        y += 12;
+        // ---- run ----
         startBtn = button(startLabel(), left, y, half, () -> {
             if (RegearRunner.isRunning()) {
                 RegearRunner.cancel(client);
@@ -99,20 +57,57 @@ public class RegearConfigScreen extends BilalScreen {
         }, null);
         pauseBtn.active = RegearRunner.isRunning();
 
-        y += 22;
-        toggle(left, y, half, "Top-up", () -> RegearConfig.topUp, v -> RegearConfig.topUp = v, RegearConfig::save,
-                "Only buy what is missing from your inventory");
-        toggle(left + half + 4, y, half, "Fill totems", () -> RegearConfig.fillTotems,
-                v -> RegearConfig.fillTotems = v, RegearConfig::save, "Buy totems last until every free slot is full");
-    }
-
-    private void shopPage(int y) {
-        int left = panelLeft() + 12;
-        int inner = panelW() - 24;
-        int half = (inner - 4) / 2;
-
-        section("Shop command (without the /)", y);
+        // ---- kit: pick, create, delete ----
+        y += 30;
+        section("Kit", y);
         y += 12;
+        int arrow = 26;
+        boolean hasKits = !RegearKits.custom().isEmpty();
+        ButtonWidget prev = button("<", left, y, arrow, () -> { RegearKits.cycle(-1); clearAndInit(); }, "Previous kit");
+        ButtonWidget next = button(">", left + inner - arrow, y, arrow, () -> { RegearKits.cycle(1); clearAndInit(); }, "Next kit");
+        prev.active = hasKits;
+        next.active = hasKits;
+        String kitName = RegearConfig.activeKit.isEmpty() ? (hasKits ? "No kit loaded - tap to choose" : "No kits yet - tap to create one")
+                : RegearConfig.activeKit;
+        button(kitName, left + arrow + 4, y, inner - 2 * (arrow + 4), () -> client.setScreen(new RegearKitScreen(this)),
+                "Create, load or delete kits. Changes below are saved into the loaded kit.");
+        y += 24;
+        button("Hotbar & offhand...", left, y, half, () -> client.setScreen(new RegearSortScreen(this)),
+                "Which item goes in which hotbar slot (saved in the kit)");
+        button("Sort now", left + half + 4, y, half, () -> {
+            client.setScreen(null);
+            RegearRunner.sortOnly(client);
+        }, "Arrange hotbar and offhand now, without buying");
+
+        // ---- items: how many of each to have (0 = skip) ----
+        y += 34;
+        section("How many of each (0 = skip)", y);
+        y += 12;
+        for (KitItem it : KitItem.values()) {
+            int i = it.ordinal();
+            int max = Math.max(it.maxStack(), 1) * 36;
+            stepper(y, it.label, () -> RegearConfig.kitAmount[i], v -> RegearConfig.kitAmount[i] = v,
+                    0, max, 1, it.maxStack(), v -> v == 0 ? "skip" : String.valueOf(v), RegearConfig::save, null);
+            y += 22;
+        }
+
+        // ---- options ----
+        y += 6;
+        toggle(left, y, half, "Only buy missing", () -> RegearConfig.topUp, v -> RegearConfig.topUp = v,
+                RegearConfig::save, "ON = counts what you already carry");
+        toggle(left + half + 4, y, half, "Arrange hotbar", () -> RegearConfig.sortEnabled,
+                v -> RegearConfig.sortEnabled = v, RegearConfig::save, "Puts the items in the usual hotbar order after buying");
+
+        y += 22;
+        toggle(left, y, half, "Fill with totems", () -> RegearConfig.fillTotems, v -> RegearConfig.fillTotems = v,
+                RegearConfig::save, "Buy totems last until every free slot is full");
+
+        // ---- shop setup (rarely needed) ----
+        y += 34;
+        section("Shop setup (same for every kit)", y);
+        y += 12;
+        label("Shop command (without the /)", left, y + 6, 0xFFFFFFFF);
+        y += 18;
         TextFieldWidget field = new TextFieldWidget(textRenderer, left, y, inner, 20, Text.literal("Shop command"));
         field.setMaxLength(40);
         field.setText(RegearConfig.command);
@@ -121,54 +116,49 @@ public class RegearConfigScreen extends BilalScreen {
             RegearConfig.save();
         });
         addDrawableChild(field);
-
-        y += 30;
-        section("Timing", y);
-        y += 12;
+        y += 26;
         stepper(y, "Click delay", () -> RegearConfig.clickDelayTicks, v -> RegearConfig.clickDelayTicks = v,
                 1, 40, 1, 5, RegearConfigScreen::secs, RegearConfig::save, "Pause between two clicks in the shop");
-        stepper(y + 22, "Wait time", () -> RegearConfig.waitTicks, v -> RegearConfig.waitTicks = v,
-                10, 200, 5, 20, RegearConfigScreen::secs, RegearConfig::save, "How long to wait for a menu or purchase message");
-
-        y += 52;
-        section("Shop layout", y);
-        y += 12;
-        button("Menu layout...", left, y, half, () -> client.setScreen(layoutScreen()),
-                "Slot numbers of the buttons in the shop menus");
-        button("Messages...", left + half + 4, y, half, () -> client.setScreen(messagesScreen()),
+        y += 22;
+        stepper(y, "Wait time", () -> RegearConfig.waitTicks, v -> RegearConfig.waitTicks = v,
+                10, 200, 5, 20, RegearConfigScreen::secs, RegearConfig::save, "How long to wait for a menu or message");
+        y += 28;
+        button("Shop slots...", left, y, half, () -> client.setScreen(slotsScreen()),
+                "Which slot each item has in the shop menus");
+        button("Chat messages...", left + half + 4, y, half, () -> client.setScreen(messagesScreen()),
                 "Chat messages the shop sends");
         y += 22;
-        toggle(left, y, half, "Windows hidden", () -> RegearConfig.hideWindow, v -> RegearConfig.hideWindow = v,
+        toggle(left, y, half, "Hide shop window", () -> RegearConfig.hideWindow, v -> RegearConfig.hideWindow = v,
                 RegearConfig::save, "Shop windows are clicked without being shown");
-        toggle(left + half + 4, y, half, "Debug", () -> RegearConfig.debug, v -> RegearConfig.debug = v,
+        toggle(left + half + 4, y, half, "Debug chat", () -> RegearConfig.debug, v -> RegearConfig.debug = v,
                 RegearConfig::save, "Print every step in chat");
-    }
 
-    private void hudPage(int y) {
-        int left = panelLeft() + 12;
+        // ---- progress box ----
+        y += 34;
         section("Progress box", y);
         y += 12;
-        cycle(left, y, panelW() - 24, "Position", 4, () -> RegearConfig.hudPos, v -> RegearConfig.hudPos = v,
-                v -> HUD_NAMES[v], RegearConfig::save, "Where the box shows while a regear runs");
-        y += 30;
+        cycle(left, y, inner, "Position", 4, () -> RegearConfig.hudPos, v -> RegearConfig.hudPos = v,
+                v -> new String[]{"off", "top center", "top left", "top right"}[v], RegearConfig::save,
+                "Where the box shows while a regear runs");
+        y += 24;
         stepper(y, "Size", () -> RegearConfig.hudScale, v -> RegearConfig.hudScale = v, 50, 200, 5, 25,
                 v -> v + "%", RegearConfig::save, null);
-        stepper(y + 22, "Move X", () -> RegearConfig.hudX, v -> RegearConfig.hudX = v, -600, 600, 1, 10,
+        y += 22;
+        stepper(y, "Move X", () -> RegearConfig.hudX, v -> RegearConfig.hudX = v, -600, 600, 1, 10,
                 v -> v + " px", RegearConfig::save, null);
-        stepper(y + 44, "Move Y", () -> RegearConfig.hudY, v -> RegearConfig.hudY = v, -600, 600, 1, 10,
+        y += 22;
+        stepper(y, "Move Y", () -> RegearConfig.hudY, v -> RegearConfig.hudY = v, -600, 600, 1, 10,
                 v -> v + " px", RegearConfig::save, null);
-        button("Reset box", left, y + 76, panelW() - 24, () -> {
-            RegearConfig.hudScale = 100;
-            RegearConfig.hudX = 0;
-            RegearConfig.hudY = 0;
-            RegearConfig.save();
-            clearAndInit();
-        }, null);
+        setHint("Everything saves by itself");
     }
 
-    private Screen layoutScreen() {
+    private Screen slotsScreen() {
         List<RegearFieldsScreen.Row> rows = new ArrayList<>();
-        rows.add(slotRow("Category slot", () -> RegearConfig.categorySlot, v -> RegearConfig.categorySlot = v));
+        rows.add(slotRow("Gear category", () -> RegearConfig.categorySlot, v -> RegearConfig.categorySlot = v));
+        for (KitItem it : KitItem.values()) {
+            int i = it.ordinal();
+            rows.add(slotRow(it.label, () -> RegearConfig.kitSlot[i], v -> RegearConfig.kitSlot[i] = v));
+        }
         rows.add(slotRow("Item shown", () -> RegearConfig.displaySlot, v -> RegearConfig.displaySlot = v));
         rows.add(slotRow("Minus 64", () -> RegearConfig.minus64Slot, v -> RegearConfig.minus64Slot = v));
         rows.add(slotRow("Minus 10", () -> RegearConfig.minus10Slot, v -> RegearConfig.minus10Slot = v));
@@ -178,7 +168,7 @@ public class RegearConfigScreen extends BilalScreen {
         rows.add(slotRow("Plus 64", () -> RegearConfig.plus64Slot, v -> RegearConfig.plus64Slot = v));
         rows.add(slotRow("Cancel", () -> RegearConfig.cancelSlot, v -> RegearConfig.cancelSlot = v));
         rows.add(slotRow("Confirm", () -> RegearConfig.confirmSlot, v -> RegearConfig.confirmSlot = v));
-        return new RegearFieldsScreen("Menu layout", this, rows, 2,
+        return new RegearFieldsScreen("Shop slots", this, rows, 2,
                 "Slots count from 0: left to right, top to bottom (row 2, column 5 = 13)");
     }
 
@@ -203,33 +193,5 @@ public class RegearConfigScreen extends BilalScreen {
     @Override
     protected void saveAndLeave() {
         RegearConfig.save();
-    }
-
-    @Override
-    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        super.render(ctx, mouseX, mouseY, delta);
-        if (page != 0) return;
-        // the card for the kit that is set up right now
-        int left = panelLeft() + 12;
-        int w = panelW() - 24;
-        box(ctx, left, cardY, left + w, cardY + 46, 0xFF15151E, 0xFF2F2F3E);
-        String name = RegearConfig.activeKit.isEmpty() ? "Custom setup" : RegearConfig.activeKit;
-        ctx.drawTextWithShadow(textRenderer, "Current kit", left + 8, cardY + 6, 0xFF9A9AA8);
-        ctx.drawTextWithShadow(textRenderer, name, left + 8 + textRenderer.getWidth("Current kit ") , cardY + 6, 0xFF55FF55);
-        int ix = left + 8;
-        boolean any = false;
-        for (KitItem it : KitItem.values()) {
-            int n = RegearConfig.kitAmount[it.ordinal()];
-            if (n <= 0) continue;
-            any = true;
-            ctx.drawItem(it.item.getDefaultStack(), ix, cardY + 22);
-            String t = String.valueOf(n);
-            ctx.drawTextWithShadow(textRenderer, t, ix + 8 - textRenderer.getWidth(t) / 2, cardY + 40 - 1, 0xFFCCCCCC);
-            ix += 36;
-        }
-        if (!any) {
-            ctx.drawTextWithShadow(textRenderer,
-                    RegearConfig.fillTotems ? "Fills free slots with totems" : "Nothing to buy", left + 8, cardY + 26, 0xFFAAAAAA);
-        }
     }
 }

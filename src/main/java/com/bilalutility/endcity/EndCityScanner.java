@@ -22,6 +22,8 @@ import net.minecraft.structure.StructureTemplateManager;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.HeightLimitView;
+import net.minecraft.util.math.noise.SimplexNoiseSampler;
+import net.minecraft.util.math.random.CheckedRandom;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.source.TheEndBiomeSource;
 import net.minecraft.world.gen.chunk.ChunkGenerator;
@@ -38,7 +40,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -101,60 +107,8 @@ public final class EndCityScanner {
         com.mojang.datafixers.DataFixer dataFixer = client.getDataFixer();
 
         try {
-        WORKER.submit(() -> {
-            LevelStorage.Session templateSession = null;
-            LifecycledResourceManagerImpl dataResourceManager = null;
-            try {
-                // An isolated vanilla SERVER_DATA manager makes the search work without a server
-                // connection and avoids relying on client assets or server-sent structure data.
-                var templateRoot = FabricLoader.getInstance().getConfigDir()
-                        .resolve("bilal_utility").resolve("endcity_template_storage");
-                LevelStorage storage = LevelStorage.create(templateRoot);
-                templateSession = storage.createSession("endcity-finder");
-                ResourcePackManager packManager = VanillaDataPackProvider.createManager(templateSession);
-                packManager.scanPacks();
-                packManager.setEnabledProfiles(List.of(VanillaResourcePackProvider.VANILLA_KEY));
-                dataResourceManager = new LifecycledResourceManagerImpl(
-                        ResourceType.SERVER_DATA, packManager.createResourcePacks());
-
-                StructureTemplateManager templateManager = new StructureTemplateManager(
-                        dataResourceManager, templateSession, dataFixer, Registries.BLOCK);
-
-                // Build the same complete vanilla registry graph used by world loading.
-                // DYNAMIC_REGISTRIES contains worldgen settings (noise parameters, biomes,
-                // structures, structure sets, etc.); DIMENSION_REGISTRIES contains dimension
-                // data such as minecraft:world/noise_settings. Both phases are loaded from the
-                // vanilla server-data pack with bound tags instead of the partial client sync.
-                List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
-                Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry));
-
-                List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
-                registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
-                registryEntries.addAll(RegistryLoader.DIMENSION_REGISTRIES);
-
-                DynamicRegistryManager.Immutable registryManager = RegistryLoader.loadFromResource(
-                        dataResourceManager, staticRegistries, registryEntries);
-
-                // Fail early with a useful message if the requested vanilla data is incomplete.
-                registryManager.getOrThrow(RegistryKeys.NOISE_PARAMETERS);
-                registryManager.getOrThrow(RegistryKeys.CHUNK_GENERATOR_SETTINGS);
-                registryManager.getOrThrow(RegistryKeys.STRUCTURE_SET);
-
-                scan(seed, centerX, centerZ, radius, ignoreSpawnRadius, registryManager, templateManager);
-            } catch (Throwable throwable) {
-                error = throwable.getClass().getSimpleName() + ": "
-                        + (throwable.getMessage() == null ? "Could not prepare vanilla structure data" : throwable.getMessage());
-                status = error;
-                state = State.ERROR;
-            } finally {
-                if (dataResourceManager != null) {
-                    try { dataResourceManager.close(); } catch (Exception ignored) {}
-                }
-                if (templateSession != null) {
-                    try { templateSession.close(); } catch (Exception ignored) {}
-                }
-            }
-        });
+            WORKER.submit(() -> runWithEnv(seed, dataFixer, (registryManager, templateManager) ->
+                    scan(seed, centerX, centerZ, radius, ignoreSpawnRadius, registryManager, templateManager)));
         } catch (RuntimeException rejected) {
             state = State.ERROR;
             error = "Could not start scanner worker: " + rejected.getClass().getSimpleName();
@@ -199,6 +153,124 @@ public final class EndCityScanner {
                 .limit(5).toList();
     }
 
+
+    // ------------------------------------------------------------------------------------------
+    // Environment shared by all worker threads (vanilla objects are thread-safe for reads).
+    // ------------------------------------------------------------------------------------------
+    private record Env(long seed, DynamicRegistryManager registryManager, StructureTemplateManager templateManager,
+                       NoiseConfig noiseConfig, ChunkGenerator generator, RandomSpreadStructurePlacement placement,
+                       RegistryEntry<Structure> structureEntry, Structure structure, HeightLimitView heightView,
+                       SimplexNoiseSampler islandNoise) {}
+
+    private static Env buildEnv(long seed, DynamicRegistryManager registryManager, StructureTemplateManager templateManager) {
+        RegistryWrapper.WrapperLookup lookup = registryManager;
+        NoiseConfig noiseConfig = NoiseConfig.create(lookup, ChunkGeneratorSettings.END, seed);
+        TheEndBiomeSource biomeSource = TheEndBiomeSource.createVanilla(lookup.getOrThrow(RegistryKeys.BIOME));
+        RegistryEntry<ChunkGeneratorSettings> settings = lookup
+                .getOrThrow(RegistryKeys.CHUNK_GENERATOR_SETTINGS).getOrThrow(ChunkGeneratorSettings.END);
+        ChunkGenerator generator = new NoiseChunkGenerator(biomeSource, settings);
+
+        StructureSet endCities = lookup.getOrThrow(RegistryKeys.STRUCTURE_SET)
+                .getOrThrow(StructureSetKeys.END_CITIES).value();
+        if (!(endCities.placement() instanceof RandomSpreadStructurePlacement placement)) {
+            throw new IllegalStateException("Vanilla End City placement is not random spread.");
+        }
+        if (endCities.structures().isEmpty()) {
+            throw new IllegalStateException("The vanilla End City structure set is empty.");
+        }
+        RegistryEntry<Structure> structureEntry = endCities.structures().get(0).structure();
+
+        // Same seeding vanilla uses for the End island noise: skip 17292 values, then build the sampler.
+        CheckedRandom random = new CheckedRandom(seed);
+        for (int i = 0; i < 17292; i++) random.nextInt();
+        SimplexNoiseSampler islandNoise = new SimplexNoiseSampler(random);
+
+        return new Env(seed, registryManager, templateManager, noiseConfig, generator, placement, structureEntry,
+                structureEntry.value(), HeightLimitView.create(0, 256), islandNoise);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Cheap pre-filter. This is a port of vanilla's End islands density term (only used to SKIP
+    // candidates that clearly have no terrain near y=60; survivors still go through vanilla's own
+    // exact check, so it can only cost speed or (if mis-tuned) miss a city, never invent one).
+    // Returns the highest island value found around the candidate's 4 height-check points.
+    // ------------------------------------------------------------------------------------------
+    private static float islandScore(SimplexNoiseSampler noise, int cx, int cz) {
+        // Height-check points are within 5 blocks of (cx, cz); noise cells are 8 blocks wide.
+        int cellMinX = Math.floorDiv(cx - 6, 8), cellMaxX = Math.floorDiv(cx + 6, 8) + 1;
+        int cellMinZ = Math.floorDiv(cz - 6, 8), cellMaxZ = Math.floorDiv(cz + 6, 8) + 1;
+        int nx = cellMaxX - cellMinX + 1, nz = cellMaxZ - cellMinZ + 1;
+        float[] f = new float[nx * nz];
+        for (int i = 0; i < nx; i++) {
+            for (int j = 0; j < nz; j++) {
+                int x = cellMinX + i, z = cellMinZ + j;
+                f[i * nz + j] = Math.max(-100.0F, Math.min(80.0F, 100.0F - (float) Math.sqrt((long) x * x + (long) z * z) * 8.0F));
+            }
+        }
+        // Vanilla: for cell x the island centres q satisfy |q - trunc(x/2)| <= 12; h = x - 2q.
+        int gx0 = Math.floorDiv(cellMinX, 2) - 13, gx1 = Math.floorDiv(cellMaxX, 2) + 13;
+        int gz0 = Math.floorDiv(cellMinZ, 2) - 13, gz1 = Math.floorDiv(cellMaxZ, 2) + 13;
+        for (long o = gx0; o <= gx1; o++) {
+            for (long p = gz0; p <= gz1; p++) {
+                if (o * o + p * p <= 4096L) continue;
+                if (noise.sample((double) o, (double) p) >= -0.9F) continue;
+                float g = (Math.abs((float) o) * 3439.0F + Math.abs((float) p) * 147.0F) % 13.0F + 9.0F;
+                for (int i = 0; i < nx; i++) {
+                    int x = cellMinX + i;
+                    if (Math.abs(o - x / 2) > 12) continue;
+                    for (int j = 0; j < nz; j++) {
+                        int z = cellMinZ + j;
+                        if (Math.abs(p - z / 2) > 12) continue;
+                        float h = (float) (x - 2 * o);
+                        float q = (float) (z - 2 * p);
+                        float r = 100.0F - (float) Math.sqrt(h * h + q * q) * g;
+                        r = Math.max(-100.0F, Math.min(80.0F, r));
+                        if (r > f[i * nz + j]) f[i * nz + j] = r;
+                    }
+                }
+            }
+        }
+        float best = -100.0F;
+        for (float v : f) if (v > best) best = v;
+        return best;
+    }
+
+    // ---- filter calibration (learned from vanilla results of this very seed) ----
+    private static final int CALIBRATION_PASSES = 40;
+    private static final float FILTER_MARGIN = 14.0F;
+    private static final AtomicInteger calibPasses = new AtomicInteger();
+    private static volatile float filterThreshold = Float.NEGATIVE_INFINITY;   // -inf = filter off
+    private static volatile boolean useFilter = true;
+    private static final Object CALIB_LOCK = new Object();
+    private static float calibMin = Float.POSITIVE_INFINITY;
+
+    private static void resetCalibration() {
+        calibPasses.set(0);
+        synchronized (CALIB_LOCK) { calibMin = Float.POSITIVE_INFINITY; }
+        filterThreshold = Float.NEGATIVE_INFINITY;
+    }
+
+    private static void recordPass(float score) {
+        if (calibPasses.get() >= CALIBRATION_PASSES && filterThreshold > Float.NEGATIVE_INFINITY) return;
+        synchronized (CALIB_LOCK) {
+            if (score < calibMin) calibMin = score;
+            if (calibPasses.incrementAndGet() >= CALIBRATION_PASSES) {
+                filterThreshold = calibMin - FILTER_MARGIN;
+            }
+        }
+    }
+
+    public static boolean useFilter() { return useFilter; }
+    public static void setUseFilter(boolean on) { useFilter = on; }
+
+    private static int threadCount() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        return Math.max(1, Math.min(4, cores - 1));
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // The scan
+    // ------------------------------------------------------------------------------------------
     private static void scan(long seed, int centerX, int centerZ, int radius, int ignoreSpawnRadius,
                              DynamicRegistryManager registryManager, StructureTemplateManager templateManager) {
         EndCityCache.Entry cache = EndCityCache.load(Long.toString(seed));
@@ -223,31 +295,14 @@ public final class EndCityScanner {
             return;
         }
 
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount(), r -> {
+            Thread t = new Thread(r, "BilalUtility-EndCityScan");
+            t.setDaemon(true);
+            return t;
+        });
         try {
-            // Use the active world's dynamic registries. BuiltinRegistries.createWrapperLookup()
-            // does not have the world's bound tags, which makes structure checks fail with
-            // IllegalStateException: tags not bound.
-            RegistryWrapper.WrapperLookup lookup = registryManager;
-            NoiseConfig noiseConfig = NoiseConfig.create(lookup, ChunkGeneratorSettings.END, seed);
-            TheEndBiomeSource biomeSource = TheEndBiomeSource.createVanilla(
-                    lookup.getOrThrow(RegistryKeys.BIOME));
-            RegistryEntry<ChunkGeneratorSettings> settings = lookup
-                    .getOrThrow(RegistryKeys.CHUNK_GENERATOR_SETTINGS)
-                    .getOrThrow(ChunkGeneratorSettings.END);
-            ChunkGenerator generator = new NoiseChunkGenerator(biomeSource, settings);
-
-            StructureSet endCities = lookup.getOrThrow(RegistryKeys.STRUCTURE_SET)
-                    .getOrThrow(StructureSetKeys.END_CITIES).value();
-            if (!(endCities.placement() instanceof RandomSpreadStructurePlacement placement)) {
-                throw new IllegalStateException("Vanilla End City placement is not random spread.");
-            }
-            if (endCities.structures().isEmpty()) {
-                throw new IllegalStateException("The vanilla End City structure set is empty.");
-            }
-
-            RegistryEntry<Structure> structureEntry = endCities.structures().get(0).structure();
-            Structure structure = structureEntry.value();
-            HeightLimitView heightView = HeightLimitView.create(0, 256);
+            Env env = buildEnv(seed, registryManager, templateManager);
+            RandomSpreadStructurePlacement placement = env.placement();
 
             int cellSize = placement.getSpacing() * 16;
             int paddedRadius = radius + 16;
@@ -265,119 +320,259 @@ public final class EndCityScanner {
             for (EndCity city : found) unique.put((((long) city.x()) << 32) ^ (city.z() & 0xffffffffL), city);
             found = new ArrayList<>(unique.values());
             results = List.copyOf(found);
+            final List<EndCity> foundList = found;
 
-            long lastCacheSave = 0;
+            resetCalibration();
+            status = "Scanning 0%";
+            int lastSaved = foundList.size();
+            long lastSaveTime = System.currentTimeMillis();
+
             for (int ring = 0; ring <= maxRing && !CANCEL.get(); ring++) {
-                for (int dz = -ring; dz <= ring && !CANCEL.get(); dz++) {
-                    for (int side : (ring == 0 ? new int[]{0} : new int[]{-ring, ring})) {
-                        int rx = centerRegionX + side;
-                        int rz = centerRegionZ + dz;
-                        if (rx < minRegionX || rx > maxRegionX || rz < minRegionZ || rz > maxRegionZ) continue;
-                        processRegion(seed, centerX, centerZ, radius, ignoreSpawnRadius, rx, rz,
-                                placement, generator, noiseConfig, heightView, structure, structureEntry,
-                                registryManager, templateManager, found, unique);
-                        scanned++;
-                        updateProgressStatus(found.size());
-                        if ((scanned & 0x1FF) == 0) Thread.yield();
-                        if (found.size() != lastCacheSave && found.size() % 8 == 0) {
-                            lastCacheSave = found.size();
-                            publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, found, false);
-                        }
+                // all regions of this ring
+                int[] rx = new int[Math.max(1, 8 * ring)];
+                int[] rz = new int[rx.length];
+                int n = 0;
+                for (int dz = -ring; dz <= ring; dz++) {
+                    for (int dx = -ring; dx <= ring; dx++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                        int x = centerRegionX + dx, z = centerRegionZ + dz;
+                        if (x < minRegionX || x > maxRegionX || z < minRegionZ || z > maxRegionZ) continue;
+                        rx[n] = x;
+                        rz[n] = z;
+                        n++;
                     }
                 }
-                for (int dx = -ring + 1; dx <= ring - 1 && !CANCEL.get(); dx++) {
-                    for (int side : new int[]{-ring, ring}) {
-                        int rx = centerRegionX + dx;
-                        int rz = centerRegionZ + side;
-                        if (rx < minRegionX || rx > maxRegionX || rz < minRegionZ || rz > maxRegionZ) continue;
-                        processRegion(seed, centerX, centerZ, radius, ignoreSpawnRadius, rx, rz,
-                                placement, generator, noiseConfig, heightView, structure, structureEntry,
-                                registryManager, templateManager, found, unique);
-                        scanned++;
-                        updateProgressStatus(found.size());
-                        if ((scanned & 0x1FF) == 0) Thread.yield();
-                        if (found.size() != lastCacheSave && found.size() % 8 == 0) {
-                            lastCacheSave = found.size();
-                            publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, found, false);
+                if (n == 0) continue;
+
+                int threads = n < 64 ? 1 : threadCount();
+                List<Future<?>> tasks = new ArrayList<>();
+                final int count = n;
+                for (int t = 0; t < threads; t++) {
+                    final int offset = t, step = threads;
+                    tasks.add(pool.submit((Callable<Void>) () -> {
+                        for (int i = offset; i < count && !CANCEL.get(); i += step) {
+                            processRegion(env, centerX, centerZ, radius, ignoreSpawnRadius, rx[i], rz[i], foundList, unique);
+                            scanned++;   // approximate under threads; only used for the progress bar
                         }
-                    }
+                        return null;
+                    }));
+                }
+                for (Future<?> f : tasks) f.get();
+
+                updateProgressStatus(foundList.size());
+                long now = System.currentTimeMillis();
+                if (foundList.size() != lastSaved && now - lastSaveTime > 5000) {
+                    synchronized (foundList) { publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, foundList, false); }
+                    lastSaved = foundList.size();
+                    lastSaveTime = now;
                 }
             }
 
-            publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, found, !CANCEL.get());
+            synchronized (foundList) { publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, foundList, !CANCEL.get()); }
             if (CANCEL.get()) {
                 state = State.CANCELLED;
-                status = "Scan stopped — " + found.size() + " ship cities saved";
+                status = "Scan stopped — " + foundList.size() + " ship cities saved";
             } else {
                 state = State.COMPLETE;
-                status = "Complete — found " + found.size() + " ship cities";
+                status = "Complete — found " + foundList.size() + " ship cities";
             }
         } catch (Throwable throwable) {
             error = throwable.getClass().getSimpleName() + ": "
                     + (throwable.getMessage() == null ? "Unknown scan error" : throwable.getMessage());
             status = error;
             state = State.ERROR;
-            publishAndSave(seed, centerX, centerZ, radius, ignoreSpawnRadius, found, false);
+        } finally {
+            pool.shutdownNow();
         }
     }
 
-    private static void processRegion(long seed, int centerX, int centerZ, int radius, int ignoreSpawnRadius,
-                                      int regionX, int regionZ, RandomSpreadStructurePlacement placement,
-                                      ChunkGenerator generator, NoiseConfig noiseConfig, HeightLimitView heightView,
-                                      Structure structure, RegistryEntry<Structure> structureEntry,
-                                      DynamicRegistryManager registryManager, StructureTemplateManager templateManager,
-                                      List<EndCity> found, Map<Long, EndCity> unique) {
-        if (CANCEL.get()) return;
-
-        // Pass the region's minimum chunk coordinate; vanilla performs the exact region RNG internally.
-        ChunkPos startChunk = placement.getStartChunk(seed, regionX * placement.getSpacing(),
+    /**
+     * Result of checking one region's candidate chunk.
+     * 0 = rejected cheaply, 1 = rejected by vanilla (no valid start), 2 = valid start but no ship, 3 = ship city.
+     */
+    private static int checkRegion(Env env, int centerX, int centerZ, int radius, int ignoreSpawnRadius,
+                                   int regionX, int regionZ, boolean allowFilter, float[] scoreOut, int[] posOut) {
+        RandomSpreadStructurePlacement placement = env.placement();
+        // vanilla does the exact region RNG internally
+        ChunkPos startChunk = placement.getStartChunk(env.seed(), regionX * placement.getSpacing(),
                 regionZ * placement.getSpacing());
         int candidateX = startChunk.getCenterX();
         int candidateZ = startChunk.getCenterZ();
 
+        // 1. free checks first: scan area and ignore area
         long paddedRadius = (long) radius + 16L;
-        if (squaredDistance(candidateX, candidateZ, centerX, centerZ) > paddedRadius * paddedRadius) return;
+        if (squaredDistance(candidateX, candidateZ, centerX, centerZ) > paddedRadius * paddedRadius) return 0;
+        long ignorePad = Math.max(0L, (long) ignoreSpawnRadius - 32L);
+        if (squaredDistance(candidateX, candidateZ, END_SPAWN_X, END_SPAWN_Z) < ignorePad * ignorePad) return 0;
 
-        // Ask the real vanilla structure to perform its exact position/height/biome check first.
-        // This uses the same deterministic Structure.Context as createStructureStart, but avoids
-        // generating all End City pieces for candidates that fail the vanilla Y>=60 check.
-        Structure.Context context = new Structure.Context(registryManager, generator, generator.getBiomeSource(),
-                noiseConfig, templateManager, seed, startChunk, heightView, structure.getValidBiomes()::contains);
+        // 2. cheap island filter (only once it has learned a threshold from vanilla results)
+        float score = islandScore(env.islandNoise(), candidateX, candidateZ);
+        scoreOut[0] = score;
+        if (allowFilter && score < filterThreshold) return 0;
+
+        // 3. exact vanilla position / height / biome check
+        Structure structure = env.structure();
+        Structure.Context context = new Structure.Context(env.registryManager(), env.generator(),
+                env.generator().getBiomeSource(), env.noiseConfig(), env.templateManager(), env.seed(), startChunk,
+                env.heightView(), structure.getValidBiomes()::contains);
         var structurePosition = structure.getValidStructurePosition(context);
-        if (structurePosition.isEmpty()) return;
+        if (structurePosition.isEmpty()) return 1;
 
         BlockPos exactPosition = structurePosition.get().position();
         int cityX = exactPosition.getX();
         int cityZ = exactPosition.getZ();
-        if (squaredDistance(cityX, cityZ, centerX, centerZ) > (long) radius * radius) return;
-        if (squaredDistance(cityX, cityZ, END_SPAWN_X, END_SPAWN_Z) < (long) ignoreSpawnRadius * ignoreSpawnRadius) return;
+        posOut[0] = cityX;
+        posOut[1] = cityZ;
+        if (squaredDistance(cityX, cityZ, centerX, centerZ) > (long) radius * radius) return 1;
+        if (squaredDistance(cityX, cityZ, END_SPAWN_X, END_SPAWN_Z) < (long) ignoreSpawnRadius * ignoreSpawnRadius) return 1;
 
-        StructureStart start = structure.createStructureStart(structureEntry, World.END, registryManager,
-                generator, generator.getBiomeSource(), noiseConfig, templateManager, seed, startChunk, 0,
-                heightView, structure.getValidBiomes()::contains);
-        if (!start.hasChildren()) return;
-
+        // 4. the real StructureStart; look for the ship piece
+        StructureStart start = structure.createStructureStart(env.structureEntry(), World.END, env.registryManager(),
+                env.generator(), env.generator().getBiomeSource(), env.noiseConfig(), env.templateManager(), env.seed(),
+                startChunk, 0, env.heightView(), structure.getValidBiomes()::contains);
+        if (!start.hasChildren()) return 1;
         for (var piece : start.getChildren()) {
             if (piece instanceof EndCityGenerator.Piece) {
                 String template = ((EndCityShipPieceAccessor) piece).bilal$getTemplateIdString();
-                if ("end_city/ship".equals(template)) {
-                    long key = (((long) cityX) << 32) ^ (cityZ & 0xffffffffL);
-                    if (!unique.containsKey(key)) {
-                        EndCity city = new EndCity(cityX, cityZ);
-                        unique.put(key, city);
-                        found.add(city);
-                    }
-                    return;
-                }
+                if ("end_city/ship".equals(template)) return 3;
+            }
+        }
+        return 2;
+    }
+
+    private static void processRegion(Env env, int centerX, int centerZ, int radius, int ignoreSpawnRadius,
+                                      int regionX, int regionZ, List<EndCity> found, Map<Long, EndCity> unique) {
+        if (CANCEL.get()) return;
+        float[] score = new float[1];
+        int[] pos = new int[2];
+        boolean learned = filterThreshold > Float.NEGATIVE_INFINITY;
+        int r = checkRegion(env, centerX, centerZ, radius, ignoreSpawnRadius, regionX, regionZ,
+                useFilter && learned, score, pos);
+        if (r >= 2) recordPass(score[0]);   // any valid start teaches the filter
+        if (r != 3) return;
+        long key = (((long) pos[0]) << 32) ^ (pos[1] & 0xffffffffL);
+        synchronized (found) {
+            if (!unique.containsKey(key)) {
+                EndCity city = new EndCity(pos[0], pos[1]);
+                unique.put(key, city);
+                found.add(city);
             }
         }
     }
 
-    private static void updateProgressStatus(int cityCount) {
-        if (scanned == 1 || scanned % 2048 == 0) {
-            long count = total <= 0 ? 0 : Math.min(100, scanned * 100 / total);
-            status = "Scanning " + count + "% • " + cityCount + " ship cities found";
+    // ------------------------------------------------------------------------------------------
+    // Verify: learns the filter on one area, then checks a different area with and without it.
+    // ------------------------------------------------------------------------------------------
+    public static synchronized boolean startVerify(MinecraftClient client, long seed) {
+        if (isRunning()) return false;
+        if (client == null) return false;
+        CANCEL.set(false);
+        state = State.SCANNING;
+        error = "";
+        status = "Verify: preparing vanilla generator...";
+        scanned = 0;
+        total = 0;
+        com.mojang.datafixers.DataFixer dataFixer = client.getDataFixer();
+        WORKER.submit(() -> runWithEnv(seed, dataFixer, (registryManager, templateManager) -> {
+            Env env = buildEnv(seed, registryManager, templateManager);
+            resetCalibration();
+            int spacing = env.placement().getSpacing();
+            int span = 36;   // 36 x 36 regions per window (about 1300 candidates)
+            float[] sc = new float[1];
+            int[] pos = new int[2];
+            int calibPass = 0;
+            // window A: learn
+            int ax = Math.floorDiv(40_000, spacing * 16), az = 0;
+            status = "Verify: learning filter (window A)...";
+            total = (long) span * span * 2;
+            for (int i = 0; i < span && !CANCEL.get(); i++) {
+                for (int j = 0; j < span && !CANCEL.get(); j++) {
+                    int r = checkRegion(env, 0, 0, 400_000, 0, ax + i, az + j, false, sc, pos);
+                    if (r >= 2) { recordPass(sc[0]); calibPass++; }
+                    scanned++;
+                }
+            }
+            if (filterThreshold == Float.NEGATIVE_INFINITY) {
+                status = "Verify: only " + calibPass + " valid cities in window A, need " + CALIBRATION_PASSES
+                        + ". Filter stays off (scan still exact, just slower).";
+                state = State.COMPLETE;
+                return;
+            }
+            // window B: compare
+            int bx = Math.floorDiv(70_000, spacing * 16), bz = Math.floorDiv(30_000, spacing * 16);
+            status = "Verify: comparing (window B)...";
+            int valid = 0, missed = 0, ships = 0, skipped = 0;
+            long tFull = 0, tFilt = 0;
+            for (int i = 0; i < span && !CANCEL.get(); i++) {
+                for (int j = 0; j < span && !CANCEL.get(); j++) {
+                    long t0 = System.nanoTime();
+                    int exact = checkRegion(env, 0, 0, 400_000, 0, bx + i, bz + j, false, sc, pos);
+                    long t1 = System.nanoTime();
+                    int filt = checkRegion(env, 0, 0, 400_000, 0, bx + i, bz + j, true, sc, pos);
+                    long t2 = System.nanoTime();
+                    tFull += t1 - t0;
+                    tFilt += t2 - t1;
+                    if (exact >= 2) valid++;
+                    if (exact == 3) ships++;
+                    if (filt == 0 && exact >= 2) missed++;
+                    if (filt == 0 && exact < 2) skipped++;
+                    scanned++;
+                }
+            }
+            double speedup = tFilt <= 0 ? 0 : (double) tFull / tFilt;
+            status = "Verify done: " + valid + " valid cities, " + ships + " with ships, filter missed " + missed
+                    + (missed == 0 ? " (OK)" : " (BAD: turn filter off)")
+                    + ". Filter skipped " + skipped + " empty spots, ~" + String.format(java.util.Locale.ROOT, "%.1f", speedup) + "x faster.";
+            if (missed > 0) useFilter = false;
+            state = State.COMPLETE;
+        }));
+        return true;
+    }
+
+    private interface EnvTask { void run(DynamicRegistryManager registryManager, StructureTemplateManager templateManager) throws Exception; }
+
+    /** Loads the vanilla data once for a task. Same loading code the scan uses. */
+    private static void runWithEnv(long seed, com.mojang.datafixers.DataFixer dataFixer, EnvTask task) {
+        LevelStorage.Session templateSession = null;
+        LifecycledResourceManagerImpl dataResourceManager = null;
+        try {
+            var templateRoot = FabricLoader.getInstance().getConfigDir()
+                    .resolve("bilal_utility").resolve("endcity_template_storage");
+            LevelStorage storage = LevelStorage.create(templateRoot);
+            templateSession = storage.createSession("endcity-finder");
+            ResourcePackManager packManager = VanillaDataPackProvider.createManager(templateSession);
+            packManager.scanPacks();
+            packManager.setEnabledProfiles(List.of(VanillaResourcePackProvider.VANILLA_KEY));
+            dataResourceManager = new LifecycledResourceManagerImpl(ResourceType.SERVER_DATA, packManager.createResourcePacks());
+            StructureTemplateManager templateManager = new StructureTemplateManager(
+                    dataResourceManager, templateSession, dataFixer, Registries.BLOCK);
+
+            List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
+            Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry.getReadOnlyWrapper()));
+            List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
+            registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
+            registryEntries.addAll(RegistryLoader.DIMENSION_REGISTRIES);
+            DynamicRegistryManager.Immutable registryManager = RegistryLoader.loadFromResource(
+                    dataResourceManager, staticRegistries, registryEntries);
+            registryManager.getOrThrow(RegistryKeys.NOISE_PARAMETERS);
+            registryManager.getOrThrow(RegistryKeys.CHUNK_GENERATOR_SETTINGS);
+            registryManager.getOrThrow(RegistryKeys.STRUCTURE_SET);
+            task.run(registryManager, templateManager);
+        } catch (Throwable throwable) {
+            error = throwable.getClass().getSimpleName() + ": "
+                    + (throwable.getMessage() == null ? "Could not prepare vanilla structure data" : throwable.getMessage());
+            status = error;
+            state = State.ERROR;
+        } finally {
+            if (dataResourceManager != null) { try { dataResourceManager.close(); } catch (Exception ignored) {} }
+            if (templateSession != null) { try { templateSession.close(); } catch (Exception ignored) {} }
         }
+    }
+
+    private static void updateProgressStatus(int cityCount) {
+        long count = total <= 0 ? 0 : Math.min(100, scanned * 100 / total);
+        status = "Scanning " + count + "% • " + cityCount + " ship cities found"
+                + (filterThreshold > Float.NEGATIVE_INFINITY && useFilter ? " • fast filter on" : " • learning filter");
     }
 
     private static long squaredDistance(int x1, int z1, int x2, int z2) {

@@ -25,7 +25,7 @@ public final class RegearConfig {
     public static int hudPos = 1;                   // 0 = off, 1 = top center, 2 = top left, 3 = top right
     public static int hudScale = 100;               // progress box size in percent
     public static int hudX = 0, hudY = 0;           // progress box offset in pixels
-    public static String activeKit = "";            // name of the kit that was loaded last (see RegearKits)
+    public static String activeKit = "";            // name of the kit that is loaded right now (see RegearKits)
 
     // ---- sorting and totems ----
     public static boolean sortEnabled = true;       // arrange hotbar + offhand after buying
@@ -230,5 +230,6 @@ public final class RegearConfig {
         } catch (IOException ignored) {
             // not fatal
         }
+        RegearKits.syncActive();   // edits are stored in the kit that is loaded
     }
 }

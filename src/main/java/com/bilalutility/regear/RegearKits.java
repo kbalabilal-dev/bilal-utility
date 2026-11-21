@@ -97,6 +97,17 @@ public final class RegearKits {
         return k;
     }
 
+    /** Writes the current settings back into the loaded kit, so editing a kit saves it. */
+    public static void syncActive() {
+        int i = activeIndex();
+        if (i < 0) return;
+        Kit old = CUSTOM.get(i);
+        Kit fresh = fromCurrent(old.name);
+        fresh.icon = old.icon == fresh.icon ? old.icon : fresh.icon;
+        CUSTOM.set(i, fresh);
+        save();
+    }
+
     /** Index of the active kit in all(), or -1. */
     public static int activeIndex() {
         List<Kit> all = all();
