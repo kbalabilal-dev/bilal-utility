@@ -3,7 +3,6 @@ package com.bilalutility.endcity;
 import com.bilalutility.mixin.EndCityShipPieceAccessor;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.registry.BuiltinRegistries;
 import net.minecraft.registry.DynamicRegistryManager;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.Registries;
@@ -78,6 +77,14 @@ public final class EndCityScanner {
     public static synchronized boolean start(MinecraftClient client, long seed, int centerX, int centerZ,
                                              int radius, int ignoreSpawnRadius) {
         if (isRunning()) return false;
+        // Structure validation requires a live world's dynamic registries (including bound tags).
+        // Never fall back to DynamicRegistryManager.EMPTY: that fails later with "tags not bound".
+        if (client == null || client.world == null) {
+            state = State.ERROR;
+            error = "No world is loaded. Join a world before starting an End City scan.";
+            status = error;
+            return false;
+        }
 
         CANCEL.set(false);
         state = State.SCANNING;
@@ -89,11 +96,12 @@ public final class EndCityScanner {
 
         // Capture client-owned references on the render thread, but do all filesystem,
         // data-pack and world-generation preparation on the worker.
-        DynamicRegistryManager registryManager = client.getServer() != null
-                ? client.getServer().getRegistryManager()
-                : client.world != null ? client.world.getRegistryManager() : DynamicRegistryManager.EMPTY;
+        // The client world's manager is the registry view associated with the currently loaded
+        // dimension and its datapack/tag bindings. Capture it on the client thread.
+        DynamicRegistryManager registryManager = client.world.getRegistryManager();
         com.mojang.datafixers.DataFixer dataFixer = client.getDataFixer();
 
+        try {
         WORKER.submit(() -> {
             LevelStorage.Session templateSession = null;
             LifecycledResourceManagerImpl dataResourceManager = null;
@@ -128,6 +136,12 @@ public final class EndCityScanner {
                 }
             }
         });
+        } catch (RuntimeException rejected) {
+            state = State.ERROR;
+            error = "Could not start scanner worker: " + rejected.getClass().getSimpleName();
+            status = error;
+            return false;
+        }
         return true;
     }
 
@@ -139,6 +153,7 @@ public final class EndCityScanner {
     }
 
     public static List<EndCityCluster> clusters(int clusterSize, double fromX, double fromZ) {
+        if (clusterSize <= 0) clusterSize = 2_000;
         Map<Long, List<EndCity>> buckets = new HashMap<>();
         for (EndCity city : results) {
             int bx = Math.floorDiv(city.x(), clusterSize);
@@ -190,7 +205,10 @@ public final class EndCityScanner {
         }
 
         try {
-            RegistryWrapper.WrapperLookup lookup = BuiltinRegistries.createWrapperLookup();
+            // Use the active world's dynamic registries. BuiltinRegistries.createWrapperLookup()
+            // does not have the world's bound tags, which makes structure checks fail with
+            // IllegalStateException: tags not bound.
+            RegistryWrapper.WrapperLookup lookup = registryManager;
             NoiseConfig noiseConfig = NoiseConfig.create(lookup, ChunkGeneratorSettings.END, seed);
             TheEndBiomeSource biomeSource = TheEndBiomeSource.createVanilla(
                     lookup.getOrThrow(RegistryKeys.BIOME));

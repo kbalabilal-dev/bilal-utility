@@ -57,7 +57,7 @@ public class EndCityFinderScreen extends BilalScreen {
         y += 26;
         if (page == Page.SCAN) buildScan(left, inner, y);
         else buildClusters(left, inner, y);
-        button("Done", width / 2 - 45, height - 28, 90, this::close, null);
+        button("Done", width / 2 - 45, height - (height < 280 ? 24 : 28), 90, this::close, null);
     }
 
     private void buildScan(int left, int inner, int y) {
@@ -72,7 +72,9 @@ public class EndCityFinderScreen extends BilalScreen {
         });
         addDrawableChild(seedField);
 
-        y += 32;
+        boolean compact = height < 280;
+        int rowGap = compact ? 25 : 32;
+        y += rowGap;
         int half = (inner - 6) / 2;
         label("Scan radius", left, y, 0xFFFFFFFF);
         label("Ignore spawn radius", left + half + 6, y, 0xFFFFFFFF);
@@ -81,7 +83,7 @@ public class EndCityFinderScreen extends BilalScreen {
         ignoreField = numericField(left + half + 6, y + 9, half, "50000", EndCityFinderConfig.ignoreSpawnRadius,
                 value -> EndCityFinderConfig.ignoreSpawnRadius = EndCityFinderConfig.clamp(value, 0, 400_000));
 
-        y += 32;
+        y += rowGap;
         int centerFieldW = (inner - 78) / 2;
         int centerZX = left + centerFieldW + 6;
         int usePosX = centerZX + centerFieldW + 8;
@@ -93,17 +95,18 @@ public class EndCityFinderScreen extends BilalScreen {
                 value -> EndCityFinderConfig.centerZ = EndCityFinderConfig.clamp(value, -30_000_000, 30_000_000));
         button("Use pos", usePosX, y + 9, 64, this::useCurrentEndPosition, "Use your current End coordinates as the scan center");
 
-        y += 32;
+        y += rowGap;
         int gap = 4;
         int buttonW = (inner - gap) / 2;
-        scanButton = button("Start scan", left, y, buttonW, () -> startScan(),
+        int actionY = y + (compact ? 4 : 0);
+        scanButton = button("Start scan", left, actionY, buttonW, () -> startScan(),
                 "Uses vanilla's End City generator and structure templates");
-        cancelButton = button("Stop scan", left + buttonW + gap, y, buttonW,
+        cancelButton = button("Stop scan", left + buttonW + gap, actionY, buttonW,
                 EndCityScanner::cancel, null);
         scanButton.active = !EndCityScanner.isRunning();
         cancelButton.active = EndCityScanner.isRunning();
 
-        dynamic(EndCityScanner::status, left, y + 22, inner, 0xFFFFCC66);
+        dynamic(EndCityScanner::status, left, actionY + (compact ? 20 : 22), inner, 0xFFFFCC66);
         setHint("");
     }
 
@@ -146,8 +149,11 @@ public class EndCityFinderScreen extends BilalScreen {
             EndCityFinderConfig.centerX = EndCityFinderConfig.clamp(Integer.parseInt(centerXField.getText().trim()), -30_000_000, 30_000_000);
             EndCityFinderConfig.centerZ = EndCityFinderConfig.clamp(Integer.parseInt(centerZField.getText().trim()), -30_000_000, 30_000_000);
             EndCityFinderConfig.save();
-            EndCityScanner.start(client, seed, EndCityFinderConfig.centerX, EndCityFinderConfig.centerZ,
+            boolean started = EndCityScanner.start(client, seed, EndCityFinderConfig.centerX, EndCityFinderConfig.centerZ,
                     EndCityFinderConfig.scanRadius, EndCityFinderConfig.ignoreSpawnRadius);
+            if (!started && client.player != null) {
+                client.player.sendMessage(Text.literal(EndCityScanner.status()), true);
+            }
             clearAndInit();
         } catch (NumberFormatException exception) {
             if (client.player != null) client.player.sendMessage(Text.literal("Enter a valid numeric seed and settings."), true);
@@ -272,11 +278,11 @@ public class EndCityFinderScreen extends BilalScreen {
         if (page == Page.CLUSTERS && shownClusters.size() > visibleRows) {
             int trackX = panelRight() - 7;
             int trackH = listBottom - listTop;
-            ctx.fill(trackX, listTop, trackX + 3, listBottom, 0xFF343440);
+            ctx.fill(trackX, listTop, trackX + 5, listBottom, 0xFF343440);
             int thumbH = Math.max(12, trackH * visibleRows / shownClusters.size());
             int max = shownClusters.size() - visibleRows;
             int thumbY = listTop + (trackH - thumbH) * scroll / max;
-            ctx.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, 0xFFFFB84D);
+            ctx.fill(trackX, thumbY, trackX + 5, thumbY + thumbH, 0xFFFFB84D);
         }
     }
 

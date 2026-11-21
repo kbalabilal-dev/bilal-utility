@@ -51,7 +51,9 @@ public abstract class BilalScreen extends Screen {
     // ---------- layout ----------
 
     protected final int panelW() {
-        return Math.min(PANEL_W, width - 12);
+        // Use the full logical viewport instead of a fixed 340px card. This prevents
+        // controls and labels from being squeezed on small/mobile-sized game windows.
+        return Math.max(1, width - 12);
     }
 
     protected final int panelLeft() {
@@ -214,8 +216,8 @@ public abstract class BilalScreen extends Screen {
 
         int px = panelLeft();
         int pw = panelW();
-        int py = 8;
-        int ph = height - 16;
+        int py = 0;
+        int ph = height;
         int solid = 0xFF000000 | accent;
         int dark = 0xFF000000 | ((accent >> 2) & 0x3F3F3F);
 
