@@ -1,21 +1,39 @@
-name: build
+
+name: Build Bilal Utility
+
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 9.2.0
-      - run: gradle build
-      - uses: actions/upload-artifact@v4
+
+      - name: Build mod
+        working-directory: bilal-utility
+        run: gradle build --no-daemon
+
+      - name: Upload mod JAR
+        uses: actions/upload-artifact@v4
         with:
           name: bilal-utility
-          path: build/libs/bilal-utility-1.1.2.jar
+          path: bilal-utility/build/libs/*.jar
+          if-no-files-found: error
