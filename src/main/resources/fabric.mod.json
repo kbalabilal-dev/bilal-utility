@@ -3,7 +3,7 @@
   "id": "bilal_utility",
   "version": "${version}",
   "name": "Bilal Utility",
-  "description": "Client-side PvP utility pack: Anchor Macro (one-key anchor bomb), Auto Regear (buys your kit from the shop, with premade and saved kits), TPAHere Picker (queued /tpahere with combat detection, pins and stats) and a HUD (armor, counters, enemy gear and a fully configurable server scoreboard).",
+  "description": "Client-side utility pack: Anchor Macro, Auto Regear, TPAHere, HUD and End City Finder.",
   "icon": "assets/bilal_utility/icon.png",
   "environment": "client",
   "entrypoints": {
@@ -11,11 +11,16 @@
       "com.bilalutility.anchor.AnchorMacroClient",
       "com.bilalutility.regear.RegearClient",
       "com.bilalutility.tpa.TpaHereClient",
-      "com.bilalutility.hud.HudClient"
+      "com.bilalutility.hud.HudClient",
+      "com.bilalutility.endcity.EndCityFinderClient"
     ],
-    "modmenu": ["com.bilalutility.BilalModMenu"]
+    "modmenu": [
+      "com.bilalutility.BilalModMenu"
+    ]
   },
-  "mixins": ["bilal_utility.mixins.json"],
+  "mixins": [
+    "bilal_utility.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.18.0",
     "minecraft": "~1.21.11",

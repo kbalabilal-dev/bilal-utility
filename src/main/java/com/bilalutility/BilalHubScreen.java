@@ -3,6 +3,8 @@ package com.bilalutility;
 import com.bilalutility.anchor.AnchorConfigScreen;
 import com.bilalutility.hud.HudConfig;
 import com.bilalutility.hud.HudConfigScreen;
+import com.bilalutility.endcity.EndCityFinderScreen;
+import com.bilalutility.endcity.EndCityScanner;
 import com.bilalutility.regear.RegearConfig;
 import com.bilalutility.regear.RegearConfigScreen;
 import com.bilalutility.regear.RegearRunner;
@@ -19,7 +21,7 @@ import java.util.function.Supplier;
 
 /** One settings entry point for the whole mod: a card per module with its icon and current status. */
 public class BilalHubScreen extends BilalScreen {
-    private static final int CARD_H = 56;
+    private static final int CARD_H = 42;
 
     private record Card(int x, int y, int w, Item icon, String title, Supplier<String> line1, Supplier<String> line2) {}
 
@@ -54,6 +56,11 @@ public class BilalHubScreen extends BilalScreen {
                 () -> RegearRunner.isRunning() ? "Running" : "Kit: " + (RegearConfig.activeKit.isEmpty() ? "custom" : RegearConfig.activeKit),
                 () -> "Buys your kit from the shop",
                 () -> client.setScreen(new RegearConfigScreen(this)));
+        y += CARD_H + 4;
+        add(left, y, cw, Items.ENDER_EYE, "End City Finder",
+                () -> EndCityScanner.isRunning() ? "Scanning..." : EndCityScanner.results().size() + " ship cities found",
+                () -> "Find End cities with ships",
+                () -> client.setScreen(new EndCityFinderScreen(this)));
 
         setHint("Keys: Options > Controls > Key Binds > Bilal Utility");
     }
@@ -67,10 +74,10 @@ public class BilalHubScreen extends BilalScreen {
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
         super.render(ctx, mouseX, mouseY, delta);
         for (Card c : cards) {
-            ctx.drawItem(c.icon().getDefaultStack(), c.x() + 8, c.y() + 8);
-            ctx.drawTextWithShadow(textRenderer, c.title(), c.x() + 30, c.y() + 12, 0xFFFFFFFF);
-            ctx.drawTextWithShadow(textRenderer, c.line1().get(), c.x() + 8, c.y() + 30, 0xFFFFCC66);
-            ctx.drawTextWithShadow(textRenderer, c.line2().get(), c.x() + 8, c.y() + 41, 0xFF9A9AA8);
+            ctx.drawItem(c.icon().getDefaultStack(), c.x() + 8, c.y() + 3);
+            ctx.drawTextWithShadow(textRenderer, c.title(), c.x() + 30, c.y() + 6, 0xFFFFFFFF);
+            ctx.drawTextWithShadow(textRenderer, c.line1().get(), c.x() + 8, c.y() + 22, 0xFFFFCC66);
+            ctx.drawTextWithShadow(textRenderer, c.line2().get(), c.x() + 8, c.y() + 32, 0xFF9A9AA8);
         }
     }
 }
