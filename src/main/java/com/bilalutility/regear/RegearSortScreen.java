@@ -1,91 +1,94 @@
 package com.bilalutility.regear;
 
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
 
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
-
-/** Sorting and totem settings: what goes in the offhand and each hotbar slot, and the totem fill toggle. */
-public class RegearSortScreen extends Screen {
-    private final Screen parent;
+/** Offhand and hotbar layout, drawn like the real hotbar. Click a slot to cycle: Leave, then every kit item. */
+public class RegearSortScreen extends BilalScreen {
+    private int offY, hotY, hotX, offX;
+    private int selected = -2;   // -1 = offhand, 0-8 = hotbar slot, -2 = none
 
     public RegearSortScreen(Screen parent) {
-        super(Text.literal("Sorting & totems"));
-        this.parent = parent;
+        super("Hotbar & offhand", "Where the regear puts your items after buying", 0x55FF55, parent);
     }
 
-    private static Text sortLabel() {
-        return Text.literal(RegearConfig.sortEnabled ? "Sort after buying: on" : "Sort after buying: off");
+    private static String nameOf(int v) {
+        return v < 0 ? "Leave alone" : KitItem.values()[v].label;
     }
 
-    private static Text fillLabel() {
-        return Text.literal(RegearConfig.fillTotems ? "Fill with totems: on" : "Fill with totems: off");
-    }
-
-    private static Text itemLabel(String name, int value) {
-        String item = value < 0 ? "Leave" : KitItem.values()[value].label;
-        return Text.literal(name + ": " + item);
+    private static int next(int v) {
+        int n = v + 1;
+        return n >= KitItem.values().length ? -1 : n;
     }
 
     @Override
-    protected void init() {
-        int left = width / 2 - 154;
-        int mid = width / 2 - 50;
-        int right = width / 2 + 54;
+    protected void build() {
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int half = (inner - 4) / 2;
+        int y = contentTop();
 
-        addDrawableChild(ButtonWidget.builder(sortLabel(), b -> {
-                    RegearConfig.sortEnabled = !RegearConfig.sortEnabled;
-                    RegearConfig.save();
-                    b.setMessage(sortLabel());
-                }).dimensions(left, 32, 152, 20).build());
-        addDrawableChild(ButtonWidget.builder(fillLabel(), b -> {
-                    RegearConfig.fillTotems = !RegearConfig.fillTotems;
-                    RegearConfig.save();
-                    b.setMessage(fillLabel());
-                }).dimensions(width / 2 + 2, 32, 152, 20).build());
+        section("Offhand", y);
+        offX = left;
+        offY = y + 12;
+        buttonSized("", offX, offY, 32, 32, () -> {
+            RegearConfig.offhandItem = next(RegearConfig.offhandItem);
+            RegearConfig.save();
+            selected = -1;
+        }, "Offhand");
 
-        addCycle(left, 58, 152, "Offhand", () -> RegearConfig.offhandItem, v -> RegearConfig.offhandItem = v);
-
-        int[] xs = {left, mid, right};
+        y = offY + 42;
+        section("Hotbar (click a slot to change it)", y);
+        hotX = left + (inner - (9 * 35 - 3)) / 2;
+        hotY = y + 12;
         for (int i = 0; i < 9; i++) {
             int idx = i;
-            int x = i % 3 == 0 ? xs[0] : i % 3 == 1 ? xs[1] : xs[2];
-            int w = 100;
-            int y = 94 + (i / 3) * 22;
-            addCycle(x, y, w, "Slot " + (i + 1), () -> RegearConfig.hotbarItem[idx], v -> RegearConfig.hotbarItem[idx] = v);
+            buttonSized("", hotX + i * 35, hotY, 32, 32, () -> {
+                RegearConfig.hotbarItem[idx] = next(RegearConfig.hotbarItem[idx]);
+                RegearConfig.save();
+                selected = idx;
+            }, "Slot " + (i + 1));
+            label(String.valueOf(i + 1), hotX + i * 35 + 14, hotY + 35, 0xFF9A9AA8);
         }
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
-    }
+        dynamic(() -> selected == -2 ? "Click a slot"
+                        : selected == -1 ? "Offhand: " + nameOf(RegearConfig.offhandItem)
+                        : "Slot " + (selected + 1) + ": " + nameOf(RegearConfig.hotbarItem[selected]),
+                left + 40, offY + 10, 160, 0xFFFFFFFF);
 
-    /** A button that cycles through: Leave, then every kit item. */
-    private void addCycle(int x, int y, int w, String name, IntSupplier get, IntConsumer set) {
-        addDrawableChild(ButtonWidget.builder(itemLabel(name, get.getAsInt()), b -> {
-                    int next = get.getAsInt() + 1;
-                    if (next >= KitItem.values().length) next = -1;
-                    set.accept(next);
-                    RegearConfig.save();
-                    b.setMessage(itemLabel(name, next));
-                }).dimensions(x, y, w, 20).build());
+        y = hotY + 56;
+        section("Options", y);
+        y += 12;
+        toggle(left, y, half, "Sort after buying", () -> RegearConfig.sortEnabled, v -> RegearConfig.sortEnabled = v,
+                RegearConfig::save, "Arrange offhand and hotbar when the purchases are done");
+        toggle(left + half + 4, y, half, "Fill with totems", () -> RegearConfig.fillTotems,
+                v -> RegearConfig.fillTotems = v, RegearConfig::save,
+                "Buy totems last until every free slot is full");
+        setHint("Sorting only moves items you already have; 'Leave alone' slots are never touched");
     }
 
     @Override
-    public void close() {
+    protected void saveAndLeave() {
         RegearConfig.save();
-        client.setScreen(parent);
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, 0xFFFFFFFF);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Fill with totems buys totems last until every free slot is full"), width / 2, 20, 0xFFAAAAAA);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Hotbar slots (click to change)"), width / 2, 83, 0xFFAAAAAA);
+    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        super.render(ctx, mouseX, mouseY, delta);
+        drawSlot(ctx, offX, offY, RegearConfig.offhandItem, selected == -1);
+        for (int i = 0; i < 9; i++) {
+            drawSlot(ctx, hotX + i * 35, hotY, RegearConfig.hotbarItem[i], selected == i);
+        }
+    }
+
+    private void drawSlot(DrawContext ctx, int x, int y, int value, boolean sel) {
+        if (value >= 0) {
+            ctx.drawItem(KitItem.values()[value].item.getDefaultStack(), x + 8, y + 8);
+        } else {
+            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("-"), x + 16, y + 12, 0xFF777788);
+        }
+        if (sel) box(ctx, x, y, x + 32, y + 32, 0x2255FF55, 0xFF55FF55);
     }
 }

@@ -28,8 +28,13 @@ public final class TpaConfig {
     public static final String DEFAULT_COMMAND = "tpahere";
     public static String command = DEFAULT_COMMAND; // command sent for every player (no leading slash)
     public static boolean hideWindow = true;        // true = confirm window is clicked without being shown
+    public static int maxRounds = 0;                // auto repeat stops after this many rounds (0 = never)
+    public static int totalSent = 0;                // teleport requests confirmed, all time
+    public static int hudScale = 100;               // progress box size in percent
+    public static int hudX = 0, hudY = 0;           // progress box offset in pixels
 
     private static final Set<String> SKIP = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    private static final Set<String> PINNED = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     static final class Data {
@@ -43,6 +48,11 @@ public final class TpaConfig {
         String command = DEFAULT_COMMAND;
         boolean hideWindow = true;
         List<String> skipList = new ArrayList<>();
+        List<String> pinned = new ArrayList<>();
+        int maxRounds = 0;
+        int totalSent = 0;
+        int hudScale = 100;
+        int hudX = 0, hudY = 0;
     }
 
     private TpaConfig() {}
@@ -72,6 +82,13 @@ public final class TpaConfig {
             hideWindow = d.hideWindow;
             SKIP.clear();
             if (d.skipList != null) SKIP.addAll(d.skipList);
+            PINNED.clear();
+            if (d.pinned != null) PINNED.addAll(d.pinned);
+            maxRounds = clamp(d.maxRounds, 0, 999);
+            totalSent = Math.max(0, d.totalSent);
+            hudScale = d.hudScale <= 0 ? 100 : clamp(d.hudScale, 50, 200);
+            hudX = clamp(d.hudX, -600, 600);
+            hudY = clamp(d.hudY, -600, 600);
         } catch (Exception ignored) {
             // keep defaults if the file is broken
         }
@@ -89,6 +106,12 @@ public final class TpaConfig {
         d.command = command;
         d.hideWindow = hideWindow;
         d.skipList = new ArrayList<>(SKIP);
+        d.pinned = new ArrayList<>(PINNED);
+        d.maxRounds = maxRounds;
+        d.totalSent = totalSent;
+        d.hudScale = hudScale;
+        d.hudX = hudX;
+        d.hudY = hudY;
         try {
             Path p = path();
             Files.createDirectories(p.getParent());
@@ -121,6 +144,19 @@ public final class TpaConfig {
     public static void setSkipped(String name, boolean skipped) {
         if (skipped) SKIP.add(name);
         else SKIP.remove(name);
+    }
+
+    public static boolean isPinned(String name) {
+        return PINNED.contains(name);
+    }
+
+    public static void setPinned(String name, boolean pinned) {
+        if (pinned) PINNED.add(name);
+        else PINNED.remove(name);
+    }
+
+    public static List<String> pinnedList() {
+        return new ArrayList<>(PINNED);
     }
 
     public static List<String> skipList() {

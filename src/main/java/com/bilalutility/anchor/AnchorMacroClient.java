@@ -58,8 +58,10 @@ public class AnchorMacroClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(AnchorMacroClient::tick);
     }
 
+    private static int chainCount = 0;
+
     private static void msg(MinecraftClient client, String text) {
-        if (client.player != null) client.player.sendMessage(Text.literal(text), true);
+        if (AnchorConfig.messages && client.player != null) client.player.sendMessage(Text.literal(text), true);
     }
 
     private static int findSlot(PlayerInventory inv, Item item) {
@@ -133,6 +135,12 @@ public class AnchorMacroClient implements ClientModInitializer {
                 || client.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
     }
 
+    /** Safety rule: don't blow an anchor when health (plus absorption) is below the set hearts. */
+    private static boolean healthOk(MinecraftClient client) {
+        if (AnchorConfig.minHealth <= 0) return true;
+        return client.player.getHealth() + client.player.getAbsorptionAmount() >= AnchorConfig.minHealth * 2f;
+    }
+
     private static void select(MinecraftClient client, int slot) {
         if (slot >= 0) client.player.getInventory().setSelectedSlot(slot);
     }
@@ -194,6 +202,10 @@ public class AnchorMacroClient implements ClientModInitializer {
             msg(client, "Anchor macro: no totem in your offhand, not blowing the anchor");
             return;
         }
+        if (!healthOk(client)) {
+            msg(client, "Anchor macro: health below " + AnchorConfig.minHealth + " hearts, not blowing the anchor");
+            return;
+        }
         // Make sure a totem is ready BEFORE this anchor goes off.
         int ready = prepareTotem(client, totemSlot);
         if (ready < 0) return;
@@ -214,6 +226,7 @@ public class AnchorMacroClient implements ClientModInitializer {
 
     private static void tick(MinecraftClient client) {
         while (runKey.wasPressed()) {
+            chainCount = 0;
             start(client);
         }
 
@@ -224,7 +237,8 @@ public class AnchorMacroClient implements ClientModInitializer {
                     chainWait--;
                 } else {
                     chainWait = -1;
-                    if (runKey.isPressed()) start(client);
+                    if (runKey.isPressed() && AnchorConfig.chainEnabled
+                            && (AnchorConfig.maxChain == 0 || chainCount < AnchorConfig.maxChain)) start(client);
                 }
             }
             return;
@@ -297,7 +311,8 @@ public class AnchorMacroClient implements ClientModInitializer {
             case 3 -> { // back to the slot you had; continue if the key is still held
                 select(client, origSlot);
                 step = -1;
-                if (runKey.isPressed()) chainWait = AnchorConfig.chainGapTicks;
+                chainCount++;
+                if (runKey.isPressed() && AnchorConfig.chainEnabled) chainWait = AnchorConfig.chainGapTicks;
             }
             default -> step = -1;
         }

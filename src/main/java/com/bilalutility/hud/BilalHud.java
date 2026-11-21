@@ -80,6 +80,21 @@ public final class BilalHud {
         ctx.drawTextWithShadow(tr, text, x, y, color);
     }
 
+    private static String facing(MinecraftClient mc) {
+        String n = mc.player.getHorizontalFacing().name();
+        return n.charAt(0) + n.substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean armorLow(MinecraftClient mc) {
+        for (EquipmentSlot slot : ARMOR) {
+            ItemStack s = mc.player.getEquippedStack(slot);
+            if (s.isEmpty() || !s.isDamageable() || s.getMaxDamage() <= 0) continue;
+            int pct = Math.round((s.getMaxDamage() - s.getDamage()) * 100f / s.getMaxDamage());
+            if (pct < 15) return true;
+        }
+        return false;
+    }
+
     private record Counter(Item item, int count, int color) {}
 
     public static void render(DrawContext ctx, RenderTickCounter tickCounter) {
@@ -94,14 +109,21 @@ public final class BilalHud {
         int leftAnchor = center - HOTBAR_GAP;   // right edge of everything on the left side
         int rightAnchor = center + HOTBAR_GAP;  // left edge of everything on the right side
 
-        int armorAnchor = c.swapSides ? rightAnchor : leftAnchor;
+        var mats = ctx.getMatrices();
+        float gs = c.scale / 100f;
+        mats.pushMatrix();
+        mats.translate(sw / 2f, (float) sh);
+        mats.scale(gs, gs);
+        mats.translate(-sw / 2f, (float) -sh);
+
+        int armorAnchor = (c.swapSides ? rightAnchor : leftAnchor) + c.armorX;
         boolean armorLeft = !c.swapSides;
-        int counterAnchor = c.swapSides ? leftAnchor : rightAnchor;
+        int counterAnchor = (c.swapSides ? leftAnchor : rightAnchor) + c.counterX;
         boolean counterLeft = c.swapSides;
 
         // ---- armor durability: 4 fixed rows (helmet, chestplate, leggings, boots) ----
         if (c.armor) {
-            int top = sh - 4 - ARMOR.length * ROW_H;
+            int top = sh - 4 - ARMOR.length * ROW_H + c.armorY;
             for (int i = 0; i < ARMOR.length; i++) {
                 ItemStack s = mc.player.getEquippedStack(ARMOR[i]);
                 if (s.isEmpty()) continue;
@@ -132,7 +154,7 @@ public final class BilalHud {
         addCounter(mc, counters, c.xp, Items.EXPERIENCE_BOTTLE, false);
 
         int rows = (counters.size() + 1) / 2;
-        int gridTop = sh - 4 - rows * ROW_H;
+        int gridTop = sh - 4 - rows * ROW_H + c.counterY;
         for (int k = 0; k < counters.size(); k++) {
             Counter ct = counters.get(k);
             int col = k % 2;
@@ -162,11 +184,27 @@ public final class BilalHud {
             lines.add("FPS " + mc.getCurrentFps());
             colors.add(0xFFFFFFFF);
         }
-        int y = (counters.isEmpty() ? sh - 4 : gridTop) - 2;
+        if (c.coords) {
+            lines.add(mc.player.getBlockX() + " " + mc.player.getBlockY() + " " + mc.player.getBlockZ()
+                    + "  " + facing(mc));
+            colors.add(0xFFDDDDDD);
+        }
+        if (c.speed) {
+            var v = mc.player.getVelocity();
+            double bps = Math.sqrt(v.x * v.x + v.z * v.z) * 20.0;
+            lines.add(String.format(Locale.ROOT, "%.1f b/s", bps));
+            colors.add(0xFFDDDDDD);
+        }
+        if (c.armorWarn && armorLow(mc)) {
+            lines.add("Armor low!");
+            colors.add(0xFFFF5555);
+        }
+        int y = (counters.isEmpty() ? sh - 4 : gridTop) - 2 + c.infoY;
         for (int i = lines.size() - 1; i >= 0; i--) {
             y -= 11;
-            line(ctx, tr, lines.get(i), colors.get(i), counterAnchor, y, counterLeft);
+            line(ctx, tr, lines.get(i), colors.get(i), counterAnchor + c.infoX, y, counterLeft);
         }
+        mats.popMatrix();
 
         if (c.targetGear) renderTarget(ctx, mc, tr, sw, sh, c);
     }
@@ -207,13 +245,21 @@ public final class BilalHud {
         int w = cell * stacks.length;
         int h = 11 + 2 + 16 + 2 + 9;
         int x, y;
+        float ts = c.targetScale / 100f;
+        int sww = Math.round(sw / ts), shh = Math.round(sh / ts);   // screen size in the panel's own scale
         switch (c.targetPos) {
-            case 1 -> { x = 10; y = sh / 2 - h / 2; }
-            case 2 -> { x = (sw - w) / 2; y = sh / 2 + 30; }
-            default -> { x = sw - w - 10; y = sh / 2 - h / 2; }
+            case 1 -> { x = 10; y = shh / 2 - h / 2; }
+            case 2 -> { x = (sww - w) / 2; y = shh / 2 + 30; }
+            default -> { x = sww - w - 10; y = shh / 2 - h / 2; }
         }
+        x += Math.round(c.targetX / ts);
+        y += Math.round(c.targetY / ts);
 
-        ctx.fill(x - 4, y - 4, x + w + 4, y + h + 4, 0x88000000);
+        var tm = ctx.getMatrices();
+        tm.pushMatrix();
+        tm.scale(ts, ts);
+
+        ctx.fill(x - 4, y - 4, x + w + 4, y + h + 4, ((c.panelOpacity * 255 / 100) << 24));
 
         float hp = t.getHealth() + t.getAbsorptionAmount();
         String title = t.getGameProfile().name() + "  " + String.format(Locale.ROOT, "%.1f", hp) + " hp  "
@@ -243,6 +289,7 @@ public final class BilalHud {
             }
             ctx.drawTextWithShadow(tr, text, cx + (cell - tr.getWidth(text)) / 2, y + 13 + 18, color);
         }
+        tm.popMatrix();
     }
 
     private static void addCounter(MinecraftClient mc, List<Counter> out, boolean on, Item item, boolean isTotem) {

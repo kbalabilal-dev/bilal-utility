@@ -94,7 +94,8 @@ public final class RegearRunner {
     public static List<String> hudLines() {
         List<String> l = new ArrayList<>();
         if (state == State.IDLE) return l;
-        l.add("Auto Regear" + (paused ? "  [PAUSED]" : ""));
+        l.add("Auto Regear" + (RegearConfig.activeKit.isEmpty() ? "" : "  [" + RegearConfig.activeKit + "]")
+                + (paused ? "  [PAUSED]" : ""));
         if (state == State.SORT) {
             l.add("Sorting hotbar and offhand...");
             return l;
@@ -155,6 +156,19 @@ public final class RegearRunner {
         navRetries = 0;
         paused = false;
         beginNavigation(client);
+    }
+
+    /** Only arranges the hotbar and offhand from what is already in the inventory (no shopping). */
+    public static void sortOnly(MinecraftClient client) {
+        if (state != State.IDLE) return;
+        if (client.player == null || client.interactionManager == null || client.getNetworkHandler() == null) return;
+        jobs.clear();
+        jobIdx = 0;
+        totalPurchases = 0;
+        donePurchases = 0;
+        paused = false;
+        status(client, "Regear: sorting inventory");
+        beginSort(client);
     }
 
     public static void cancel(MinecraftClient client) {

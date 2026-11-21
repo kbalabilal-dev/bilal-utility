@@ -28,6 +28,31 @@ public class HudClient implements ClientModInitializer {
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT,
                 Identifier.of("bilal_utility", "bilal_hud"), BilalHud::render);
 
+        // The server's side panel (scoreboard sidebar): hidden, scaled and moved, or redrawn as a custom panel.
+        HudElementRegistry.replaceElement(VanillaHudElements.SCOREBOARD, original -> (ctx, tickCounter) -> {
+            HudConfig.Data c = HudConfig.d;
+            if (c.sbHidden) return;
+            if (c.sbMode == 1) {
+                ScoreboardPanel.render(ctx);
+                return;
+            }
+            if (c.scoreboardScale == 100 && c.sbX == 0 && c.sbY == 0) {
+                original.render(ctx, tickCounter);
+                return;
+            }
+            float scale = c.scoreboardScale / 100f;
+            float sw = ctx.getScaledWindowWidth();
+            float sh = ctx.getScaledWindowHeight();
+            var m = ctx.getMatrices();
+            m.pushMatrix();
+            // scale towards the right edge, vertically centered (where the sidebar sits), then move by the offset
+            m.translate(sw + c.sbX, sh / 2f + c.sbY);
+            m.scale(scale, scale);
+            m.translate(-sw, -sh / 2f);
+            original.render(ctx, tickCounter);
+            m.popMatrix();
+        });
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (toggleKey.wasPressed()) {
                 HudConfig.d.enabled = !HudConfig.d.enabled;

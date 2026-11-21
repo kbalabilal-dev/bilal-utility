@@ -1,11 +1,11 @@
 package com.bilalutility.regear;
 
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,135 +13,157 @@ import java.util.Locale;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
-public class RegearConfigScreen extends Screen {
-    private static final String[] HUD_NAMES = {"HUD: off", "HUD: top center", "HUD: top left", "HUD: top right"};
+public class RegearConfigScreen extends BilalScreen {
+    private static final String[] TABS = {"Kit", "Shop", "Progress box"};
+    private static final String[] HUD_NAMES = {"off", "top center", "top left", "top right"};
+    private static int lastPage = 0;
 
-    private final Screen parent;
-    private TextFieldWidget commandField;
+    private int page;
+    private int cardY;
     private ButtonWidget startBtn, pauseBtn;
 
     public RegearConfigScreen(Screen parent) {
-        super(Text.literal("Auto Regear settings"));
-        this.parent = parent;
+        super("Auto Regear", "Buys your kit from the server shop", 0x55FF55, parent);
+        this.page = lastPage;
     }
 
     private static String secs(int ticks) {
-        return String.format(Locale.ROOT, "%.2f", ticks / 20.0);
+        return String.format(Locale.ROOT, "%.2f s", ticks / 20.0);
     }
 
-    private static Text topUpLabel() {
-        return Text.literal(RegearConfig.topUp ? "Top-up: on" : "Top-up: off");
+    private static String startLabel() {
+        return RegearRunner.isRunning() ? "Stop regear" : "Start regear";
     }
 
-    private static Text windowLabel() {
-        return Text.literal(RegearConfig.hideWindow ? "Windows: hidden" : "Windows: shown");
-    }
-
-    private static Text debugLabel() {
-        return Text.literal(RegearConfig.debug ? "Debug: on" : "Debug: off");
-    }
-
-    private static Text startLabel() {
-        return Text.literal(RegearRunner.isRunning() ? "Stop regear" : "Start regear");
-    }
-
-    private static Text pauseLabel() {
-        return Text.literal(RegearRunner.isPaused() ? "Resume" : "Pause");
+    private static String pauseLabel() {
+        return RegearRunner.isPaused() ? "Resume" : "Pause";
     }
 
     @Override
-    protected void init() {
-        // Command that opens the shop. Saved while you type.
-        commandField = new TextFieldWidget(textRenderer, width / 2 - 100, 28, 200, 20, Text.literal("Shop command"));
-        commandField.setMaxLength(40);
-        commandField.setText(RegearConfig.command);
-        commandField.setChangedListener(s -> {
+    protected void build() {
+        lastPage = page;
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int y = contentTop();
+
+        int tw = (inner - 6) / 3;
+        for (int i = 0; i < TABS.length; i++) {
+            int idx = i;
+            ButtonWidget b = button(TABS[i], left + i * (tw + 3), y, tw, () -> {
+                page = idx;
+                clearAndInit();
+            }, null);
+            b.active = i != page;
+        }
+        y += 28;
+        if (page == 0) kitPage(y); else if (page == 1) shopPage(y); else hudPage(y);
+    }
+
+    private void kitPage(int y) {
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int half = (inner - 4) / 2;
+
+        cardY = y;   // the "current kit" card is drawn here (46 px high)
+        y += 52;
+
+        button("Choose a kit...", left, y, half, () -> client.setScreen(new RegearKitScreen(this)),
+                "Premade kits and your saved kits, with icons");
+        button("Edit items...", left + half + 4, y, half, () -> client.setScreen(new RegearKitEditScreen(this)),
+                "Amount and shop slot of every item");
+        y += 22;
+        button("Hotbar & offhand...", left, y, half, () -> client.setScreen(new RegearSortScreen(this)),
+                "Where the regear puts your items after buying");
+        button("Sort only", left + half + 4, y, half, () -> {
+            client.setScreen(null);
+            RegearRunner.sortOnly(client);
+        }, "Arrange hotbar and offhand now, without buying anything");
+
+        y += 30;
+        section("Run", y);
+        y += 12;
+        startBtn = button(startLabel(), left, y, half, () -> {
+            if (RegearRunner.isRunning()) {
+                RegearRunner.cancel(client);
+                startBtn.setMessage(Text.literal(startLabel()));
+                pauseBtn.active = false;
+            } else {
+                client.setScreen(null);
+                RegearRunner.start(client);
+            }
+        }, null);
+        startBtn.active = client != null && client.world != null;
+        pauseBtn = button(pauseLabel(), left + half + 4, y, half, () -> {
+            RegearRunner.togglePause(client);
+            pauseBtn.setMessage(Text.literal(pauseLabel()));
+        }, null);
+        pauseBtn.active = RegearRunner.isRunning();
+
+        y += 22;
+        toggle(left, y, half, "Top-up", () -> RegearConfig.topUp, v -> RegearConfig.topUp = v, RegearConfig::save,
+                "Only buy what is missing from your inventory");
+        toggle(left + half + 4, y, half, "Fill totems", () -> RegearConfig.fillTotems,
+                v -> RegearConfig.fillTotems = v, RegearConfig::save, "Buy totems last until every free slot is full");
+    }
+
+    private void shopPage(int y) {
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int half = (inner - 4) / 2;
+
+        section("Shop command (without the /)", y);
+        y += 12;
+        TextFieldWidget field = new TextFieldWidget(textRenderer, left, y, inner, 20, Text.literal("Shop command"));
+        field.setMaxLength(40);
+        field.setText(RegearConfig.command);
+        field.setChangedListener(s -> {
             RegearConfig.command = RegearConfig.cleanCommand(s);
             RegearConfig.save();
         });
-        addDrawableChild(commandField);
+        addDrawableChild(field);
 
-        addStepper(54, "Click delay", () -> RegearConfig.clickDelayTicks, v -> RegearConfig.clickDelayTicks = v, 1, 40, 1, 5);
-        addStepper(76, "Wait time", () -> RegearConfig.waitTicks, v -> RegearConfig.waitTicks = v, 10, 200, 5, 20);
+        y += 30;
+        section("Timing", y);
+        y += 12;
+        stepper(y, "Click delay", () -> RegearConfig.clickDelayTicks, v -> RegearConfig.clickDelayTicks = v,
+                1, 40, 1, 5, RegearConfigScreen::secs, RegearConfig::save, "Pause between two clicks in the shop");
+        stepper(y + 22, "Wait time", () -> RegearConfig.waitTicks, v -> RegearConfig.waitTicks = v,
+                10, 200, 5, 20, RegearConfigScreen::secs, RegearConfig::save, "How long to wait for a menu or purchase message");
 
-        int left = width / 2 - 100;
-        int right = width / 2 + 2;
-
-        // Row A: sub pages
-        addDrawableChild(ButtonWidget.builder(Text.literal("Kit items..."), b -> client.setScreen(kitScreen()))
-                .dimensions(left, 102, 98, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Menu layout..."), b -> client.setScreen(layoutScreen()))
-                .dimensions(right, 102, 98, 20).build());
-
-        // Row B
-        addDrawableChild(ButtonWidget.builder(Text.literal("Messages..."), b -> client.setScreen(messagesScreen()))
-                .dimensions(left, 124, 98, 20).build());
-        addDrawableChild(ButtonWidget.builder(topUpLabel(), b -> {
-                    RegearConfig.topUp = !RegearConfig.topUp;
-                    RegearConfig.save();
-                    b.setMessage(topUpLabel());
-                }).dimensions(right, 124, 98, 20).build());
-
-        // Row C
-        addDrawableChild(ButtonWidget.builder(windowLabel(), b -> {
-                    RegearConfig.hideWindow = !RegearConfig.hideWindow;
-                    RegearConfig.save();
-                    b.setMessage(windowLabel());
-                }).dimensions(left, 146, 98, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal(HUD_NAMES[RegearConfig.hudPos]), b -> {
-                    RegearConfig.hudPos = (RegearConfig.hudPos + 1) % HUD_NAMES.length;
-                    RegearConfig.save();
-                    b.setMessage(Text.literal(HUD_NAMES[RegearConfig.hudPos]));
-                }).dimensions(right, 146, 98, 20).build());
-
-        // Row D: start / pause
-        startBtn = addDrawableChild(ButtonWidget.builder(startLabel(), b -> {
-                    if (RegearRunner.isRunning()) {
-                        RegearRunner.cancel(client);
-                        b.setMessage(startLabel());
-                        pauseBtn.active = false;
-                    } else {
-                        client.setScreen(null);
-                        RegearRunner.start(client);
-                    }
-                }).dimensions(left, 168, 98, 20).build());
-        startBtn.active = client.world != null;
-
-        pauseBtn = addDrawableChild(ButtonWidget.builder(pauseLabel(), b -> {
-                    RegearRunner.togglePause(client);
-                    b.setMessage(pauseLabel());
-                }).dimensions(right, 168, 98, 20).build());
-        pauseBtn.active = RegearRunner.isRunning();
-
-        // Row E: sorting and totem options
-        addDrawableChild(ButtonWidget.builder(Text.literal("Sorting & totems..."), b -> client.setScreen(new RegearSortScreen(this)))
-                .dimensions(left, 190, 98, 20).build());
-        addDrawableChild(ButtonWidget.builder(debugLabel(), b -> {
-                    RegearConfig.debug = !RegearConfig.debug;
-                    RegearConfig.save();
-                    b.setMessage(debugLabel());
-                }).dimensions(right, 190, 98, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
+        y += 52;
+        section("Shop layout", y);
+        y += 12;
+        button("Menu layout...", left, y, half, () -> client.setScreen(layoutScreen()),
+                "Slot numbers of the buttons in the shop menus");
+        button("Messages...", left + half + 4, y, half, () -> client.setScreen(messagesScreen()),
+                "Chat messages the shop sends");
+        y += 22;
+        toggle(left, y, half, "Windows hidden", () -> RegearConfig.hideWindow, v -> RegearConfig.hideWindow = v,
+                RegearConfig::save, "Shop windows are clicked without being shown");
+        toggle(left + half + 4, y, half, "Debug", () -> RegearConfig.debug, v -> RegearConfig.debug = v,
+                RegearConfig::save, "Print every step in chat");
     }
 
-    private Screen kitScreen() {
-        List<RegearFieldsScreen.Row> rows = new ArrayList<>();
-        for (KitItem k : KitItem.values()) {
-            int i = k.ordinal();
-            rows.add(new RegearFieldsScreen.Row(k.label,
-                    () -> String.valueOf(RegearConfig.kitSlot[i]),
-                    s -> RegearConfig.kitSlot[i] = RegearConfig.parse(s, RegearConfig.kitSlot[i], 0, 53)));
-        }
-        for (KitItem k : KitItem.values()) {
-            int i = k.ordinal();
-            rows.add(new RegearFieldsScreen.Row(k.label,
-                    () -> String.valueOf(RegearConfig.kitAmount[i]),
-                    s -> RegearConfig.kitAmount[i] = RegearConfig.parse(s, RegearConfig.kitAmount[i], 0, 9999)));
-        }
-        return new RegearFieldsScreen("Kit items", this, rows, 2,
-                "Left: shop slot of each item.  Right: how many to carry (0 = skip)");
+    private void hudPage(int y) {
+        int left = panelLeft() + 12;
+        section("Progress box", y);
+        y += 12;
+        cycle(left, y, panelW() - 24, "Position", 4, () -> RegearConfig.hudPos, v -> RegearConfig.hudPos = v,
+                v -> HUD_NAMES[v], RegearConfig::save, "Where the box shows while a regear runs");
+        y += 30;
+        stepper(y, "Size", () -> RegearConfig.hudScale, v -> RegearConfig.hudScale = v, 50, 200, 5, 25,
+                v -> v + "%", RegearConfig::save, null);
+        stepper(y + 22, "Move X", () -> RegearConfig.hudX, v -> RegearConfig.hudX = v, -600, 600, 1, 10,
+                v -> v + " px", RegearConfig::save, null);
+        stepper(y + 44, "Move Y", () -> RegearConfig.hudY, v -> RegearConfig.hudY = v, -600, 600, 1, 10,
+                v -> v + " px", RegearConfig::save, null);
+        button("Reset box", left, y + 76, panelW() - 24, () -> {
+            RegearConfig.hudScale = 100;
+            RegearConfig.hudX = 0;
+            RegearConfig.hudY = 0;
+            RegearConfig.save();
+            clearAndInit();
+        }, null);
     }
 
     private Screen layoutScreen() {
@@ -178,39 +200,36 @@ public class RegearConfigScreen extends Screen {
                 "Part of the message is enough. Upper/lower case does not matter.");
     }
 
-    private void addStepper(int y, String name, IntSupplier get, IntConsumer set,
-                            int min, int max, int small, int big) {
-        int x0 = width / 2 - 134;
-        ButtonWidget label = ButtonWidget.builder(
-                Text.literal(name + " " + secs(get.getAsInt()) + "s"), b -> { })
-                .dimensions(x0 + 84, y, 100, 20).build();
-        label.active = false;
-
-        int[] steps = {-big, -small, small, big};
-        int[] xs = {x0, x0 + 42, x0 + 186, x0 + 228};
-        for (int i = 0; i < 4; i++) {
-            int d = steps[i];
-            String text = (d < 0 ? "-" : "+") + secs(Math.abs(d));
-            addDrawableChild(ButtonWidget.builder(Text.literal(text), b -> {
-                        set.accept(MathHelper.clamp(get.getAsInt() + d, min, max));
-                        RegearConfig.save();
-                        label.setMessage(Text.literal(name + " " + secs(get.getAsInt()) + "s"));
-                    }).dimensions(xs[i], y, 40, 20).build());
-        }
-        addDrawableChild(label);
-    }
-
     @Override
-    public void close() {
+    protected void saveAndLeave() {
         RegearConfig.save();
-        client.setScreen(parent);
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 6, 0xFFFFFFFF);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Shop command (without the /)"), width / 2, 17, 0xFFAAAAAA);
+    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        super.render(ctx, mouseX, mouseY, delta);
+        if (page != 0) return;
+        // the card for the kit that is set up right now
+        int left = panelLeft() + 12;
+        int w = panelW() - 24;
+        box(ctx, left, cardY, left + w, cardY + 46, 0xFF15151E, 0xFF2F2F3E);
+        String name = RegearConfig.activeKit.isEmpty() ? "Custom setup" : RegearConfig.activeKit;
+        ctx.drawTextWithShadow(textRenderer, "Current kit", left + 8, cardY + 6, 0xFF9A9AA8);
+        ctx.drawTextWithShadow(textRenderer, name, left + 8 + textRenderer.getWidth("Current kit ") , cardY + 6, 0xFF55FF55);
+        int ix = left + 8;
+        boolean any = false;
+        for (KitItem it : KitItem.values()) {
+            int n = RegearConfig.kitAmount[it.ordinal()];
+            if (n <= 0) continue;
+            any = true;
+            ctx.drawItem(it.item.getDefaultStack(), ix, cardY + 22);
+            String t = String.valueOf(n);
+            ctx.drawTextWithShadow(textRenderer, t, ix + 8 - textRenderer.getWidth(t) / 2, cardY + 40 - 1, 0xFFCCCCCC);
+            ix += 36;
+        }
+        if (!any) {
+            ctx.drawTextWithShadow(textRenderer,
+                    RegearConfig.fillTotems ? "Fills free slots with totems" : "Nothing to buy", left + 8, cardY + 26, 0xFFAAAAAA);
+        }
     }
 }

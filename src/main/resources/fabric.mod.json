@@ -3,7 +3,7 @@
   "id": "bilal_utility",
   "version": "${version}",
   "name": "Bilal Utility",
-  "description": "Client-side PvP utility pack: Anchor Macro (one-key anchor bomb), Auto Regear (buys your kit from the shop), TPAHere Picker (queued /tpahere with combat detection) and a HUD (totem count, armor durability and more next to the hotbar).",
+  "description": "Client-side PvP utility pack: Anchor Macro (one-key anchor bomb), Auto Regear (buys your kit from the shop, with premade and saved kits), TPAHere Picker (queued /tpahere with combat detection, pins and stats) and a HUD (armor, counters, enemy gear and a fully configurable server scoreboard).",
   "icon": "assets/bilal_utility/icon.png",
   "environment": "client",
   "entrypoints": {

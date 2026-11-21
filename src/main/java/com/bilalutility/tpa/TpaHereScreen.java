@@ -1,7 +1,7 @@
 package com.bilalutility.tpa;
 
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
@@ -13,109 +13,123 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-public class TpaHereScreen extends Screen {
-    private static final int TOP = 56;
+public class TpaHereScreen extends BilalScreen {
     private static final int ROW_H = 24;
-    private static final int RESERVED_SINGLE = 36;
-    private static final int RESERVED_MULTI = 84;
+    private static final int RESERVED_SINGLE = 40;
+    private static final int RESERVED_MULTI = 88;
 
     // Remembered between openings of the screen.
     private static boolean autoRepeat = false;
 
     private TextFieldWidget search;
-    private ButtonWidget prev, next, multiBtn, sendBtn, selPageBtn, selAllBtn, autoBtn;
+    private ButtonWidget prev, next, multiBtn, sendBtn, selPageBtn, selAllBtn, selPinBtn, autoBtn, pinBtn;
     private final List<ButtonWidget> playerButtons = new ArrayList<>();
     private final Set<String> selected = new LinkedHashSet<>();
     private List<String> filtered = List.of();   // players matching the search
     private List<String> pageNames = List.of();  // players shown on this page
     private int page = 0;
+    private int top;
     private boolean empty = false;
     private boolean multi = false;
+    private boolean pinMode = false;
 
     public TpaHereScreen() {
-        super(Text.literal("Tap a player to send /" + TpaConfig.command));
+        super("TPAHere", "Tap a player to send /" + TpaConfig.command, 0x3FA9FF, null);
     }
 
     @Override
-    protected void init() {
+    protected boolean hasDoneButton() {
+        return false;
+    }
+
+    @Override
+    protected void build() {
         playerButtons.clear();
+        int left = panelLeft() + 12;
+        int cx = centerX();
+        int y = contentTop();
+        top = y + 28;
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Settings"),
-                        b -> client.setScreen(new TpaConfigScreen(this)))
-                .dimensions(4, 4, 56, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(autoHitLabel(), b -> {
-                    TpaAutoHit.toggle(client);
-                    b.setMessage(autoHitLabel());
-                }).dimensions(width - 94, 4, 90, 20).build());
+        button("Settings", left, y, 60, () -> client.setScreen(new TpaConfigScreen(this)), "Open the TPAHere settings");
 
         String oldSearch = search != null ? search.getText() : "";
-        search = new TextFieldWidget(textRenderer, width / 2 - 102, 28, 118, 20, Text.literal("Search"));
+        search = new TextFieldWidget(textRenderer, left + 64, y, 126, 20, Text.literal("Search"));
         search.setText(oldSearch);
         search.setChangedListener(s -> { page = 0; rebuild(); });
         addDrawableChild(search);
 
-        multiBtn = addDrawableChild(ButtonWidget.builder(multiLabel(), b -> {
-                    multi = !multi;
-                    if (!multi) selected.clear();
-                    b.setMessage(multiLabel());
-                    rebuild();
-                }).dimensions(width / 2 + 22, 28, 80, 20).build());
+        multiBtn = toggleButton(left + 194, y, 58, "Multi", () -> multi, () -> {
+            multi = !multi;
+            if (!multi) selected.clear();
+            rebuild();
+        }, "Select several players and send them as a queue");
+        pinBtn = toggleButton(left + 256, y, 60, "Pin", () -> pinMode, () -> {
+            pinMode = !pinMode;
+            rebuild();
+        }, "While ON, tapping a player pins or unpins them (pinned players are listed first)");
 
-        selPageBtn = addDrawableChild(ButtonWidget.builder(Text.literal("Select page"), b -> {
-                    List<String> l = selectable(pageNames);
-                    if (allSelected(l)) selected.removeAll(l);
-                    else selected.addAll(l);
-                    rebuild();
-                }).dimensions(width / 2 - 102, height - 76, 100, 20).build());
+        selPageBtn = button("Select page", left + 1, height - 78, 100, () -> {
+            List<String> l = selectable(pageNames);
+            if (allSelected(l)) selected.removeAll(l); else selected.addAll(l);
+            rebuild();
+        }, null);
+        selAllBtn = button("Select all", left + 108, height - 78, 100, () -> {
+            List<String> l = selectable(filtered);
+            if (allSelected(l)) selected.removeAll(l); else selected.addAll(l);
+            rebuild();
+        }, null);
+        selPinBtn = button("Pinned", left + 215, height - 78, 100, () -> {
+            for (String n : TpaConfig.pinnedList()) {
+                if (!TpaConfig.isSkipped(n) && TpaQueue.onlineNames(client, "").contains(n)) selected.add(n);
+            }
+            rebuild();
+        }, "Select every pinned player that is online");
 
-        selAllBtn = addDrawableChild(ButtonWidget.builder(Text.literal("Select all"), b -> {
-                    List<String> l = selectable(filtered);
-                    if (allSelected(l)) selected.removeAll(l);
-                    else selected.addAll(l);
-                    rebuild();
-                }).dimensions(width / 2 + 2, height - 76, 100, 20).build());
+        autoBtn = button(autoLabel(), left + 1, height - 54, 84, () -> {
+            autoRepeat = !autoRepeat;
+            autoBtn.setMessage(Text.literal(autoLabel()));
+        }, "Start a new round when the queue ends");
+        sendBtn = button(sendLabel(), left + 92, height - 54, 224, this::sendSelected, null);
 
-        autoBtn = addDrawableChild(ButtonWidget.builder(autoLabel(), b -> {
-                    autoRepeat = !autoRepeat;
-                    b.setMessage(autoLabel());
-                }).dimensions(width / 2 - 102, height - 52, 72, 20).build());
-
-        sendBtn = addDrawableChild(ButtonWidget.builder(sendLabel(), b -> sendSelected())
-                .dimensions(width / 2 - 26, height - 52, 128, 20).build());
-
-        prev = addDrawableChild(ButtonWidget.builder(Text.literal("<"), b -> { page--; rebuild(); })
-                .dimensions(width / 2 - 104, height - 28, 44, 20).build());
-        next = addDrawableChild(ButtonWidget.builder(Text.literal(">"), b -> { page++; rebuild(); })
-                .dimensions(width / 2 + 60, height - 28, 44, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
+        prev = button("<", cx - 104, height - 30, 44, () -> { page--; rebuild(); }, null);
+        next = button(">", cx + 60, height - 30, 44, () -> { page++; rebuild(); }, null);
+        button("Close", cx - 50, height - 30, 100, this::close, null);
+        button(TpaAutoHit.isEnabled() ? "Auto hit: ON" : "Auto hit: OFF", panelRight() - 96, height - 30, 84, () -> {
+            TpaAutoHit.toggle(client);
+            clearAndInit();
+        }, "Right click every few milliseconds (also restarts the last queue)");
 
         setInitialFocus(search);
         rebuild();
     }
 
-    private Text multiLabel() {
-        return Text.literal(multi ? "Multi: ON" : "Multi: OFF");
+    private ButtonWidget toggleButton(int x, int y, int w, String name, java.util.function.BooleanSupplier on,
+                                      Runnable flip, String tip) {
+        ButtonWidget[] ref = new ButtonWidget[1];
+        ref[0] = button(label(name, on.getAsBoolean()), x, y, w, () -> {
+            flip.run();
+            ref[0].setMessage(Text.literal(label(name, on.getAsBoolean())));
+        }, tip);
+        return ref[0];
     }
 
-    private Text autoHitLabel() {
-        return Text.literal(TpaAutoHit.isEnabled() ? "Auto hit: ON" : "Auto hit: OFF");
+    private static String label(String name, boolean on) {
+        return name + (on ? ": ON" : ": OFF");
     }
 
-    private Text autoLabel() {
-        return Text.literal(autoRepeat ? "Auto: ON" : "Auto: OFF");
+    private String autoLabel() {
+        return autoRepeat ? "Auto: ON" : "Auto: OFF";
     }
 
-    private Text sendLabel() {
-        return Text.literal("Send selected (" + selected.size() + ")");
+    private String sendLabel() {
+        return "Send selected (" + selected.size() + ")";
     }
 
     private Text nameLabel(String name) {
         if (TpaConfig.isSkipped(name)) return Text.literal(name).formatted(Formatting.RED);
-        return selected.contains(name)
-                ? Text.literal("\u2714 " + name).formatted(Formatting.GREEN)
-                : Text.literal(name);
+        if (selected.contains(name)) return Text.literal("\u2714 " + name).formatted(Formatting.GREEN);
+        if (TpaConfig.isPinned(name)) return Text.literal("\u2605 " + name).formatted(Formatting.GOLD);
+        return Text.literal(name);
     }
 
     /** Players that are not on the skip list. */
@@ -133,14 +147,21 @@ public class TpaHereScreen extends Screen {
 
         selected.removeIf(TpaConfig::isSkipped);
 
-        filtered = TpaQueue.onlineNames(client, search.getText());
+        // pinned players first, then the rest, both sorted by name
+        List<String> all = new ArrayList<>(TpaQueue.onlineNames(client, search.getText()));
+        List<String> ordered = new ArrayList<>();
+        for (String n : all) if (TpaConfig.isPinned(n)) ordered.add(n);
+        for (String n : all) if (!TpaConfig.isPinned(n)) ordered.add(n);
+        filtered = ordered;
         empty = filtered.isEmpty();
+
         int reserved = multi ? RESERVED_MULTI : RESERVED_SINGLE;
-        int rows = Math.max(1, (height - TOP - reserved) / ROW_H);
-        int perPage = rows * 2;
+        int rows = Math.max(1, (height - top - reserved) / ROW_H);
+        int perPage = rows * 3;
         int maxPage = Math.max(0, (filtered.size() - 1) / perPage);
         page = MathHelper.clamp(page, 0, maxPage);
 
+        int x0 = panelLeft() + 13;
         int start = page * perPage;
         int end = Math.min(filtered.size(), start + perPage);
         pageNames = new ArrayList<>(filtered.subList(start, end));
@@ -148,10 +169,12 @@ public class TpaHereScreen extends Screen {
         for (int i = start; i < end; i++) {
             String name = filtered.get(i);
             int idx = i - start;
-            int col = idx % 2;
-            int row = idx / 2;
             ButtonWidget b = ButtonWidget.builder(nameLabel(name), btn -> {
-                        if (multi) {
+                        if (pinMode) {
+                            TpaConfig.setPinned(name, !TpaConfig.isPinned(name));
+                            TpaConfig.save();
+                            rebuild();
+                        } else if (multi) {
                             if (!selected.remove(name)) selected.add(name);
                             btn.setMessage(nameLabel(name));
                             updateButtons();
@@ -159,9 +182,9 @@ public class TpaHereScreen extends Screen {
                             send(name);
                         }
                     })
-                    .dimensions(width / 2 - 102 + col * 104, TOP + row * ROW_H, 100, 20).build();
+                    .dimensions(x0 + (idx % 3) * 104, top + (idx / 3) * ROW_H, 102, 20).build();
             // Skip-list players can't be selected for the queue (but a single tap still sends).
-            b.active = !(multi && TpaConfig.isSkipped(name));
+            b.active = !(multi && !pinMode && TpaConfig.isSkipped(name));
             playerButtons.add(b);
             addDrawableChild(b);
         }
@@ -173,6 +196,7 @@ public class TpaHereScreen extends Screen {
     private void updateButtons() {
         selPageBtn.visible = multi;
         selAllBtn.visible = multi;
+        selPinBtn.visible = multi;
         autoBtn.visible = multi;
         sendBtn.visible = multi;
 
@@ -182,7 +206,8 @@ public class TpaHereScreen extends Screen {
         selAllBtn.setMessage(Text.literal(allSelected(selAll) ? "Unselect all" : "Select all"));
         selPageBtn.active = !selPage.isEmpty();
         selAllBtn.active = !selAll.isEmpty();
-        sendBtn.setMessage(sendLabel());
+        selPinBtn.active = !TpaConfig.pinnedList().isEmpty();
+        sendBtn.setMessage(Text.literal(sendLabel()));
         sendBtn.active = !selected.isEmpty();
     }
 
@@ -206,9 +231,8 @@ public class TpaHereScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, 0xFFFFFFFF);
         if (empty) {
-            context.drawCenteredTextWithShadow(textRenderer, Text.literal("No players found"), width / 2, TOP + 10, 0xFFAAAAAA);
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal("No players found"), width / 2, top + 10, 0xFFAAAAAA);
         }
     }
 }

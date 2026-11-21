@@ -1,14 +1,21 @@
 {
-  "key.anchormacro.run": "Anchor macro (tap = one anchor, hold = keep going)",
-  "key.regear.start": "Start / stop auto regear",
-  "key.regear.pause": "Pause / resume auto regear",
-  "key.regear.settings": "Open Auto Regear settings",
-  "key.tpahere.open": "Open TPAHere picker (press again to stop a queue)",
-  "key.tpahere.cancel": "Cancel TPAHere queue",
-  "key.tpahere.pause": "Pause / resume TPAHere queue",
-  "key.tpahere.autohit": "Toggle TPAHere auto hit",
-  "key.tpahere.settings": "Open TPAHere settings",
-  "key.bilalhud.toggle": "Toggle HUD",
-  "key.bilalhud.settings": "Open HUD settings",
-  "key.category.bilal_utility.main": "Bilal Utility"
+  "key.category.bilal_utility.main": "Bilal Utility",
+
+  "key.anchormacro.run": "Anchor Macro | Fire anchor (tap = one, hold = chain)",
+
+  "key.regear.start": "Auto Regear | Start / stop buying your kit",
+  "key.regear.pause": "Auto Regear | Pause / resume the run",
+  "key.regear.sort": "Auto Regear | Sort hotbar and offhand only (no buying)",
+  "key.regear.nextkit": "Auto Regear | Load next kit",
+  "key.regear.prevkit": "Auto Regear | Load previous kit",
+  "key.regear.settings": "Auto Regear | Open settings",
+
+  "key.tpahere.open": "TPAHere | Open player picker (press again to stop a running queue)",
+  "key.tpahere.cancel": "TPAHere | Stop the queue",
+  "key.tpahere.pause": "TPAHere | Pause / resume the queue",
+  "key.tpahere.autohit": "TPAHere | Toggle auto hit (also restarts the last queue)",
+  "key.tpahere.settings": "TPAHere | Open settings",
+
+  "key.bilalhud.toggle": "HUD | Show / hide the HUD",
+  "key.bilalhud.settings": "HUD | Open settings"
 }

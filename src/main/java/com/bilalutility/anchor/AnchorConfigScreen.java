@@ -1,89 +1,85 @@
 package com.bilalutility.anchor;
 
-import net.minecraft.client.gui.DrawContext;
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
 
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
-
-public class AnchorConfigScreen extends Screen {
-    private final Screen parent;
+public class AnchorConfigScreen extends BilalScreen {
+    private static final int[][] PRESETS = {{2, 3, 6, 14}, {1, 2, 4, 10}, {0, 1, 2, 8}};
+    private static final String[] PRESET_NAMES = {"Safe", "Normal", "Fast"};
 
     public AnchorConfigScreen(Screen parent) {
-        super(Text.literal("Anchor Macro settings"));
-        this.parent = parent;
+        super("Anchor Macro", "One key: place, charge and blow a respawn anchor", 0xFF8A2A, parent);
     }
 
-    @Override
-    protected void init() {
-        int x0 = width / 2 - 100;
-        int y = 30;
-
-        // Speed presets: set all four values in one click.
-        addPreset(x0, y, "Safe", 2, 3, 6, 14);
-        addPreset(x0 + 68, y, "Normal", 1, 2, 4, 10);
-        addPreset(x0 + 136, y, "Fast", 0, 1, 2, 8);
-
-        y += 30;
-        addStepper(y, "Step delay", () -> AnchorConfig.stepDelayTicks, v -> AnchorConfig.stepDelayTicks = v, 0, 20);
-        addStepper(y + 24, "Place wait", () -> AnchorConfig.placeWaitTicks, v -> AnchorConfig.placeWaitTicks = v, 0, 20);
-        addStepper(y + 48, "Chain gap", () -> AnchorConfig.chainGapTicks, v -> AnchorConfig.chainGapTicks = v, 0, 40);
-        addStepper(y + 72, "Max wait", () -> AnchorConfig.maxWaitTicks, v -> AnchorConfig.maxWaitTicks = v, 3, 60);
-
-        addDrawableChild(ButtonWidget.builder(offhandLabel(), b -> {
-                    AnchorConfig.requireOffhandTotem = !AnchorConfig.requireOffhandTotem;
-                    AnchorConfig.save();
-                    b.setMessage(offhandLabel());
-                }).dimensions(x0, y + 104, 200, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
-    }
-
-    private static Text offhandLabel() {
-        return Text.literal(AnchorConfig.requireOffhandTotem
-                ? "Need offhand totem to blow: ON" : "Need offhand totem to blow: OFF");
-    }
-
-    private void addPreset(int x, int y, String name, int step, int place, int chain, int maxWait) {
-        addDrawableChild(ButtonWidget.builder(Text.literal(name), b -> {
-                    AnchorConfig.applyPreset(step, place, chain, maxWait);
-                    client.setScreen(new AnchorConfigScreen(parent));
-                }).dimensions(x, y, 64, 20).build());
-    }
-
-    private void addStepper(int y, String name, IntSupplier get, IntConsumer set, int min, int max) {
-        int x0 = width / 2 - 100;
-        ButtonWidget label = ButtonWidget.builder(Text.literal(name + ": " + get.getAsInt() + " ticks"), b -> { })
-                .dimensions(x0 + 22, y, 156, 20).build();
-        label.active = false;
-        int[] steps = {-1, 1};
-        int[] xs = {x0, x0 + 180};
-        for (int i = 0; i < 2; i++) {
-            int d = steps[i];
-            addDrawableChild(ButtonWidget.builder(Text.literal(d < 0 ? "-" : "+"), b -> {
-                        set.accept(MathHelper.clamp(get.getAsInt() + d, min, max));
-                        AnchorConfig.save();
-                        label.setMessage(Text.literal(name + ": " + get.getAsInt() + " ticks"));
-                    }).dimensions(xs[i], y, 20, 20).build());
+    public static String currentPreset() {
+        for (int i = 0; i < PRESETS.length; i++) {
+            int[] p = PRESETS[i];
+            if (AnchorConfig.stepDelayTicks == p[0] && AnchorConfig.placeWaitTicks == p[1]
+                    && AnchorConfig.chainGapTicks == p[2] && AnchorConfig.maxWaitTicks == p[3]) return PRESET_NAMES[i];
         }
-        addDrawableChild(label);
+        return "Custom";
+    }
+
+    private static String ticks(int v) {
+        return v + " t";
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, 0xFFFFFFFF);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("20 ticks = 1 second. Lower = faster, but too low can fail on laggy servers."),
-                width / 2, height - 46, 0xFFAAAAAA);
+    protected void build() {
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int y = contentTop();
+
+        section("Speed preset", y);
+        y += 12;
+        int w = (inner - 8) / 3;
+        for (int i = 0; i < PRESETS.length; i++) {
+            int[] p = PRESETS[i];
+            button(PRESET_NAMES[i], left + i * (w + 4), y, w, () -> {
+                AnchorConfig.applyPreset(p[0], p[1], p[2], p[3]);
+                client.setScreen(new AnchorConfigScreen(parent));
+            }, "Sets all four timings below at once");
+        }
+        dynamic(() -> "Current: " + currentPreset(), left + inner - 90, y - 16, 90, 0xFFFFCC66);
+
+        y += 28;
+        section("Timing (20 ticks = 1 second)", y);
+        y += 12;
+        stepper(y, "Step delay", () -> AnchorConfig.stepDelayTicks, v -> AnchorConfig.stepDelayTicks = v,
+                0, 20, 1, 5, AnchorConfigScreen::ticks, AnchorConfig::save, "Pause between charge and blow");
+        stepper(y + 22, "Place wait", () -> AnchorConfig.placeWaitTicks, v -> AnchorConfig.placeWaitTicks = v,
+                0, 20, 1, 5, AnchorConfigScreen::ticks, AnchorConfig::save, "Pause after placing, before charging");
+        stepper(y + 44, "Chain gap", () -> AnchorConfig.chainGapTicks, v -> AnchorConfig.chainGapTicks = v,
+                0, 40, 1, 5, AnchorConfigScreen::ticks, AnchorConfig::save, "Pause between two anchors while held");
+        stepper(y + 66, "Max wait", () -> AnchorConfig.maxWaitTicks, v -> AnchorConfig.maxWaitTicks = v,
+                3, 60, 1, 5, AnchorConfigScreen::ticks, AnchorConfig::save, "How long to wait for the server before giving up");
+
+        y += 94;
+        section("Safety and chaining", y);
+        y += 12;
+        stepper(y, "Min health", () -> AnchorConfig.minHealth, v -> AnchorConfig.minHealth = v,
+                0, 20, 1, 5, v -> v == 0 ? "off" : v + " hearts", AnchorConfig::save,
+                "Never blow an anchor below this many hearts (0 = off)");
+        stepper(y + 22, "Chain limit", () -> AnchorConfig.maxChain, v -> AnchorConfig.maxChain = v,
+                0, 50, 1, 5, v -> v == 0 ? "no limit" : v + " anchors", AnchorConfig::save,
+                "Stop the held-key chain after this many anchors");
+
+        y += 48;
+        int half = (inner - 4) / 2;
+        toggle(left, y, half, "Offhand totem", () -> AnchorConfig.requireOffhandTotem,
+                v -> AnchorConfig.requireOffhandTotem = v, AnchorConfig::save,
+                "Never blow an anchor without a totem in your offhand");
+        toggle(left + half + 4, y, half, "Hold to chain", () -> AnchorConfig.chainEnabled,
+                v -> AnchorConfig.chainEnabled = v, AnchorConfig::save,
+                "Holding the key keeps going with the next anchor");
+        toggle(left, y + 22, half, "Messages", () -> AnchorConfig.messages,
+                v -> AnchorConfig.messages = v, AnchorConfig::save, "Action-bar messages from the macro");
+
+        setHint("Lower timings are faster but can fail on laggy servers");
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    protected void saveAndLeave() {
+        AnchorConfig.save();
     }
 }

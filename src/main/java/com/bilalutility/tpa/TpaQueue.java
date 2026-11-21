@@ -150,6 +150,7 @@ public final class TpaQueue {
         queue.clear();
         state = State.IDLE;
         paused = false;
+        TpaConfig.save();
         status(client, "TPAHere: cancelled");
     }
 
@@ -165,7 +166,11 @@ public final class TpaQueue {
     }
 
     private static void finishRound(MinecraftClient client) {
-        if (repeat) {
+        TpaConfig.save();   // keeps the all-time counter
+        if (repeat && TpaConfig.maxRounds > 0 && round >= TpaConfig.maxRounds) {
+            state = State.IDLE;
+            status(client, "TPAHere: finished " + round + " rounds, sent " + sent + " in the last one");
+        } else if (repeat) {
             pauseTicks = sent > 0 ? TpaConfig.roundPauseTicks : Math.max(TpaConfig.roundPauseTicks, 200);
             timer = 0;
             state = State.LOOP_PAUSE;
@@ -190,6 +195,7 @@ public final class TpaQueue {
         client.interactionManager.clickSlot(h.syncId, CONFIRM_SLOT, 0, SlotActionType.PICKUP, client.player);
         lastClickedSyncId = h.syncId;
         sent++;
+        TpaConfig.totalSent++;
         if (sent > total) total = sent;
         return true;
     }
@@ -216,7 +222,7 @@ public final class TpaQueue {
         List<String> l = new ArrayList<>();
         if (state == State.IDLE) return l;
         boolean hold = combatHold();
-        l.add("TPAHere" + (repeat ? "  (round " + round + ")" : "") + (paused ? "  [PAUSED]" : "")
+        l.add("TPAHere" + (repeat ? "  (round " + round + (TpaConfig.maxRounds > 0 ? "/" + TpaConfig.maxRounds : "") + ")" : "") + (paused ? "  [PAUSED]" : "")
                 + (hold ? "  [COMBAT " + TpaCombat.secondsLeft() + "s]" : ""));
         switch (state) {
             case WAITING -> l.add("Sending: " + current);

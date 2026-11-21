@@ -1,6 +1,6 @@
 package com.bilalutility.tpa;
 
-import net.minecraft.client.gui.DrawContext;
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -13,11 +13,9 @@ import java.util.List;
 import java.util.TreeSet;
 
 /** Tap a name to put it on / take it off the skip list. */
-public class TpaSkipScreen extends Screen {
-    private static final int TOP = 56;
+public class TpaSkipScreen extends BilalScreen {
     private static final int ROW_H = 24;
 
-    private final Screen parent;
     private TextFieldWidget search;
     private ButtonWidget prev, next, addBtn;
     private final List<ButtonWidget> buttons = new ArrayList<>();
@@ -25,34 +23,40 @@ public class TpaSkipScreen extends Screen {
     private boolean empty = false;
 
     public TpaSkipScreen(Screen parent) {
-        super(Text.literal("Skip list (red = never sent)"));
-        this.parent = parent;
+        super("Skip list", "Red names are never sent a request. Tap a name to switch.", 0xFF5555, parent);
     }
 
     @Override
-    protected void init() {
-        buttons.clear();
+    protected boolean hasDoneButton() {
+        return false;
+    }
 
-        search = new TextFieldWidget(textRenderer, width / 2 - 102, 28, 148, 20, Text.literal("Search"));
+    @Override
+    protected void build() {
+        buttons.clear();
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int y = contentTop();
+
+        String old = search != null ? search.getText() : "";
+        search = new TextFieldWidget(textRenderer, left, y, inner - 60, 20, Text.literal("Search"));
+        search.setText(old);
         search.setChangedListener(s -> { page = 0; rebuild(); });
         addDrawableChild(search);
 
-        addBtn = addDrawableChild(ButtonWidget.builder(Text.literal("Add"), b -> {
-                    String t = search.getText().trim();
-                    if (valid(t)) {
-                        TpaConfig.setSkipped(t, true);
-                        TpaConfig.save();
-                        search.setText("");
-                        rebuild();
-                    }
-                }).dimensions(width / 2 + 50, 28, 52, 20).build());
+        addBtn = button("Add", left + inner - 56, y, 56, () -> {
+            String t = search.getText().trim();
+            if (valid(t)) {
+                TpaConfig.setSkipped(t, true);
+                TpaConfig.save();
+                search.setText("");
+                rebuild();
+            }
+        }, "Adds the typed name even if that player is offline");
 
-        prev = addDrawableChild(ButtonWidget.builder(Text.literal("<"), b -> { page--; rebuild(); })
-                .dimensions(width / 2 - 104, height - 28, 44, 20).build());
-        next = addDrawableChild(ButtonWidget.builder(Text.literal(">"), b -> { page++; rebuild(); })
-                .dimensions(width / 2 + 60, height - 28, 44, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
+        prev = button("<", centerX() - 104, height - 30, 44, () -> { page--; rebuild(); }, null);
+        next = button(">", centerX() + 60, height - 30, 44, () -> { page++; rebuild(); }, null);
+        button("Done", centerX() - 50, height - 30, 100, this::close, null);
 
         setInitialFocus(search);
         rebuild();
@@ -62,10 +66,8 @@ public class TpaSkipScreen extends Screen {
         return name.matches("[A-Za-z0-9_.]{1,20}");
     }
 
-    private Text label(String name) {
-        return TpaConfig.isSkipped(name)
-                ? Text.literal(name).formatted(Formatting.RED)
-                : Text.literal(name);
+    private Text nameLabel(String name) {
+        return TpaConfig.isSkipped(name) ? Text.literal(name).formatted(Formatting.RED) : Text.literal(name);
     }
 
     private List<String> entries() {
@@ -80,26 +82,26 @@ public class TpaSkipScreen extends Screen {
         for (ButtonWidget b : buttons) remove(b);
         buttons.clear();
 
+        int top = contentTop() + 28;
         List<String> all = entries();
         empty = all.isEmpty();
-        int rows = Math.max(1, (height - TOP - 36) / ROW_H);
-        int perPage = rows * 2;
+        int rows = Math.max(1, (height - top - 40) / ROW_H);
+        int perPage = rows * 3;
         int maxPage = Math.max(0, (all.size() - 1) / perPage);
         page = MathHelper.clamp(page, 0, maxPage);
 
+        int x0 = panelLeft() + 13;
         int start = page * perPage;
         int end = Math.min(all.size(), start + perPage);
         for (int i = start; i < end; i++) {
             String name = all.get(i);
             int idx = i - start;
-            int col = idx % 2;
-            int row = idx / 2;
-            ButtonWidget b = ButtonWidget.builder(label(name), btn -> {
+            ButtonWidget b = ButtonWidget.builder(nameLabel(name), btn -> {
                         TpaConfig.setSkipped(name, !TpaConfig.isSkipped(name));
                         TpaConfig.save();
-                        btn.setMessage(label(name));
+                        btn.setMessage(nameLabel(name));
                     })
-                    .dimensions(width / 2 - 102 + col * 104, TOP + row * ROW_H, 100, 20).build();
+                    .dimensions(x0 + (idx % 3) * 104, top + (idx / 3) * ROW_H, 102, 20).build();
             buttons.add(b);
             addDrawableChild(b);
         }
@@ -110,17 +112,11 @@ public class TpaSkipScreen extends Screen {
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
-    }
-
-    @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void render(net.minecraft.client.gui.DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, 0xFFFFFFFF);
         if (empty) {
             context.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("Nobody here. Type a name and tap Add."), width / 2, TOP + 10, 0xFFAAAAAA);
+                    Text.literal("Nobody here. Type a name and tap Add."), width / 2, contentTop() + 44, 0xFFAAAAAA);
         }
     }
 }

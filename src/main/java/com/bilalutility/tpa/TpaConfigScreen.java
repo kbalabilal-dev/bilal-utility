@@ -1,166 +1,126 @@
 package com.bilalutility.tpa;
 
-import net.minecraft.client.gui.DrawContext;
+import com.bilalutility.ui.BilalScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
 
 import java.util.Locale;
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
 
-public class TpaConfigScreen extends Screen {
-    private static final String[] HUD_NAMES = {"HUD: off", "HUD: top center", "HUD: top left", "HUD: top right"};
+public class TpaConfigScreen extends BilalScreen {
+    private static final String[] TABS = {"Timing", "Options", "Progress box"};
+    private static final String[] HUD_NAMES = {"off", "top center", "top left", "top right"};
+    private static int lastPage = 0;
 
-    private final Screen parent;
-    private TextFieldWidget commandField;
+    private int page;
     private ButtonWidget pauseBtn;
 
     public TpaConfigScreen(Screen parent) {
-        super(Text.literal("TPAHere settings"));
-        this.parent = parent;
+        super("TPAHere settings", "Queued /tpahere with combat detection", 0x3FA9FF, parent);
+        this.page = lastPage;
     }
 
     private static String secs(int ticks) {
-        return String.format(Locale.ROOT, "%.1f", ticks / 20.0);
-    }
-
-    private static Text windowLabel() {
-        return Text.literal(TpaConfig.hideWindow ? "Window: hidden" : "Window: shown");
-    }
-
-    private static Text combatLabel() {
-        return Text.literal(TpaConfig.combatPause ? "Combat pause: ON" : "Combat pause: OFF");
-    }
-
-    private static Text autoHitLabel() {
-        return Text.literal(TpaAutoHit.isEnabled() ? "Auto hit: ON" : "Auto hit: OFF");
-    }
-
-    private static Text pauseLabel() {
-        return Text.literal(TpaQueue.isPaused() ? "Resume queue" : "Pause queue");
+        return String.format(Locale.ROOT, "%.1f s", ticks / 20.0);
     }
 
     @Override
-    protected void init() {
-        int y = 40;
-        addStepper(y, "Delay", () -> TpaConfig.delayTicks, v -> TpaConfig.delayTicks = v, 2, 100, 2, 10);
-        addStepper(y + 20, "Skip wait", () -> TpaConfig.windowTimeoutTicks, v -> TpaConfig.windowTimeoutTicks = v, 10, 100, 2, 10);
-        addStepper(y + 40, "Round pause", () -> TpaConfig.roundPauseTicks, v -> TpaConfig.roundPauseTicks = v, 10, 600, 10, 100);
+    protected void build() {
+        lastPage = page;
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int y = contentTop();
 
-        addMsStepper(y + 60, "Auto hit", 50, 5000, 50, 100);
+        int tw = (inner - 6) / 3;
+        for (int i = 0; i < TABS.length; i++) {
+            int idx = i;
+            ButtonWidget b = button(TABS[i], left + i * (tw + 3), y, tw, () -> {
+                page = idx;
+                clearAndInit();
+            }, null);
+            b.active = i != page;
+        }
+        y += 28;
+        if (page == 0) timing(y); else if (page == 1) options(y); else hudBox(y);
+    }
 
-        // Command that is sent for every player. Saved while you type.
-        commandField = new TextFieldWidget(textRenderer, width / 2 - 100, y + 96, 200, 20, Text.literal("Command"));
-        commandField.setMaxLength(40);
-        commandField.setText(TpaConfig.command);
-        commandField.setChangedListener(s -> {
+    private void timing(int y) {
+        section("Timing", y);
+        y += 12;
+        stepper(y, "Delay", () -> TpaConfig.delayTicks, v -> TpaConfig.delayTicks = v, 2, 100, 2, 10,
+                TpaConfigScreen::secs, TpaConfig::save, "Pause between players");
+        stepper(y + 22, "Skip wait", () -> TpaConfig.windowTimeoutTicks, v -> TpaConfig.windowTimeoutTicks = v,
+                10, 100, 2, 10, TpaConfigScreen::secs, TpaConfig::save, "How long to wait for the confirm window");
+        stepper(y + 44, "Round pause", () -> TpaConfig.roundPauseTicks, v -> TpaConfig.roundPauseTicks = v,
+                10, 600, 10, 100, TpaConfigScreen::secs, TpaConfig::save, "Pause before a new round (auto mode)");
+        stepper(y + 66, "Auto hit", () -> TpaConfig.autoHitDelayMs, v -> TpaConfig.autoHitDelayMs = v,
+                50, 5000, 50, 100, v -> v + " ms", TpaConfig::save, "Right click once every X milliseconds");
+        stepper(y + 88, "Max rounds", () -> TpaConfig.maxRounds, v -> TpaConfig.maxRounds = v,
+                0, 999, 1, 5, v -> v == 0 ? "endless" : v + " rounds", TpaConfig::save,
+                "Auto repeat stops after this many rounds");
+    }
+
+    private void options(int y) {
+        int left = panelLeft() + 12;
+        int inner = panelW() - 24;
+        int half = (inner - 4) / 2;
+
+        section("Command", y);
+        y += 12;
+        TextFieldWidget field = new TextFieldWidget(textRenderer, left, y, inner, 20, Text.literal("Command"));
+        field.setMaxLength(40);
+        field.setText(TpaConfig.command);
+        field.setChangedListener(s -> {
             TpaConfig.command = TpaConfig.cleanCommand(s);
             TpaConfig.save();
         });
-        addDrawableChild(commandField);
+        addDrawableChild(field);
+        dynamic(() -> "sends  /" + TpaConfig.command + " <player>", left, y + 30, inner, 0xFF9A9AA8);
 
-        int row1 = y + 120;
-        addDrawableChild(ButtonWidget.builder(Text.literal(HUD_NAMES[TpaConfig.hudPos]), b -> {
-                    TpaConfig.hudPos = (TpaConfig.hudPos + 1) % HUD_NAMES.length;
-                    TpaConfig.save();
-                    b.setMessage(Text.literal(HUD_NAMES[TpaConfig.hudPos]));
-                }).dimensions(width / 2 - 100, row1, 98, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(windowLabel(), b -> {
-                    TpaConfig.hideWindow = !TpaConfig.hideWindow;
-                    TpaConfig.save();
-                    b.setMessage(windowLabel());
-                }).dimensions(width / 2 + 2, row1, 98, 20).build());
-
-        int row2 = row1 + 22;
-        addDrawableChild(ButtonWidget.builder(Text.literal("Skip list (" + TpaConfig.skipCount() + ")"),
-                        b -> client.setScreen(new TpaSkipScreen(this)))
-                .dimensions(width / 2 - 100, row2, 98, 20).build());
-
-        pauseBtn = addDrawableChild(ButtonWidget.builder(pauseLabel(), b -> {
-                    TpaQueue.togglePause(client);
-                    b.setMessage(pauseLabel());
-                }).dimensions(width / 2 + 2, row2, 98, 20).build());
+        y += 50;
+        section("Behaviour", y);
+        y += 12;
+        toggle(left, y, half, "Confirm window", () -> !TpaConfig.hideWindow, v -> TpaConfig.hideWindow = !v,
+                TpaConfig::save, "ON = you see the confirm window, OFF = it is clicked without being shown");
+        toggle(left + half + 4, y, half, "Combat pause", () -> TpaConfig.combatPause,
+                v -> TpaConfig.combatPause = v, TpaConfig::save, "Hold the queue while 'Combat: Xs' shows");
+        y += 22;
+        button("Skip list (" + TpaConfig.skipCount() + ")", left, y, half,
+                () -> client.setScreen(new TpaSkipScreen(this)), "Players that are never sent a request");
+        pauseBtn = button(TpaQueue.isPaused() ? "Resume queue" : "Pause queue", left + half + 4, y, half, () -> {
+            TpaQueue.togglePause(client);
+            pauseBtn.setMessage(Text.literal(TpaQueue.isPaused() ? "Resume queue" : "Pause queue"));
+        }, null);
         pauseBtn.active = TpaQueue.isRunning();
 
-        int row3 = row2 + 22;
-        addDrawableChild(ButtonWidget.builder(combatLabel(), b -> {
-                    TpaConfig.combatPause = !TpaConfig.combatPause;
-                    TpaConfig.save();
-                    b.setMessage(combatLabel());
-                }).dimensions(width / 2 - 100, row3, 98, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(autoHitLabel(), b -> {
-                    TpaAutoHit.toggle(client);
-                    b.setMessage(autoHitLabel());
-                }).dimensions(width / 2 + 2, row3, 98, 20).build());
-
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(width / 2 - 50, height - 28, 100, 20).build());
+        dynamic(() -> "Requests sent, all time: " + TpaConfig.totalSent, left, y + 40, inner, 0xFFFFCC66);
     }
 
-    /** Stepper for the auto hit delay, in milliseconds. */
-    private void addMsStepper(int y, String name, int min, int max, int small, int big) {
-        int x0 = width / 2 - 134;
-        ButtonWidget label = ButtonWidget.builder(
-                Text.literal(name + " " + TpaConfig.autoHitDelayMs + "ms"), b -> { })
-                .dimensions(x0 + 84, y, 100, 20).build();
-        label.active = false;
-
-        int[] steps = {-big, -small, small, big};
-        int[] xs = {x0, x0 + 42, x0 + 186, x0 + 228};
-        for (int i = 0; i < 4; i++) {
-            int d = steps[i];
-            String text = (d < 0 ? "-" : "+") + Math.abs(d);
-            addDrawableChild(ButtonWidget.builder(Text.literal(text), b -> {
-                        TpaConfig.autoHitDelayMs = MathHelper.clamp(TpaConfig.autoHitDelayMs + d, min, max);
-                        TpaConfig.save();
-                        label.setMessage(Text.literal(name + " " + TpaConfig.autoHitDelayMs + "ms"));
-                    }).dimensions(xs[i], y, 40, 20).build());
-        }
-        addDrawableChild(label);
-    }
-
-    private void addStepper(int y, String name, IntSupplier get, IntConsumer set,
-                            int min, int max, int small, int big) {
-        int x0 = width / 2 - 134;
-        ButtonWidget label = ButtonWidget.builder(
-                Text.literal(name + " " + secs(get.getAsInt()) + "s"), b -> { })
-                .dimensions(x0 + 84, y, 100, 20).build();
-        label.active = false;
-
-        int[] steps = {-big, -small, small, big};
-        int[] xs = {x0, x0 + 42, x0 + 186, x0 + 228};
-        for (int i = 0; i < 4; i++) {
-            int d = steps[i];
-            String text = (d < 0 ? "-" : "+") + secs(Math.abs(d));
-            addDrawableChild(ButtonWidget.builder(Text.literal(text), b -> {
-                        set.accept(MathHelper.clamp(get.getAsInt() + d, min, max));
-                        TpaConfig.save();
-                        label.setMessage(Text.literal(name + " " + secs(get.getAsInt()) + "s"));
-                    }).dimensions(xs[i], y, 40, 20).build());
-        }
-        addDrawableChild(label);
+    private void hudBox(int y) {
+        int left = panelLeft() + 12;
+        section("Progress box", y);
+        y += 12;
+        cycle(left, y, panelW() - 24, "Position", 4, () -> TpaConfig.hudPos, v -> TpaConfig.hudPos = v,
+                v -> HUD_NAMES[v], TpaConfig::save, "Where the box shows while a queue runs");
+        y += 30;
+        stepper(y, "Size", () -> TpaConfig.hudScale, v -> TpaConfig.hudScale = v, 50, 200, 5, 25,
+                v -> v + "%", TpaConfig::save, null);
+        stepper(y + 22, "Move X", () -> TpaConfig.hudX, v -> TpaConfig.hudX = v, -600, 600, 1, 10,
+                v -> v + " px", TpaConfig::save, null);
+        stepper(y + 44, "Move Y", () -> TpaConfig.hudY, v -> TpaConfig.hudY = v, -600, 600, 1, 10,
+                v -> v + " px", TpaConfig::save, null);
+        button("Reset box", left, y + 76, panelW() - 24, () -> {
+            TpaConfig.hudScale = 100;
+            TpaConfig.hudX = 0;
+            TpaConfig.hudY = 0;
+            TpaConfig.save();
+            clearAndInit();
+        }, null);
     }
 
     @Override
-    public void close() {
+    protected void saveAndLeave() {
         TpaConfig.save();
-        client.setScreen(parent);
-    }
-
-    @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
-        context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 6, 0xFFFFFFFF);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Delay: pause between players"), width / 2, 18, 0xFFAAAAAA);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Skip wait: how long to wait for the confirm window"), width / 2, 28, 0xFFAAAAAA);
-        context.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Command (no /) - sends: /" + TpaConfig.command + " <player>"), width / 2, 126, 0xFFAAAAAA);
     }
 }

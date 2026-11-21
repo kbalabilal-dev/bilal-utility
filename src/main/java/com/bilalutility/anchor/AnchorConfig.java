@@ -17,6 +17,10 @@ public final class AnchorConfig {
     public static int chainGapTicks = 4;    // pause between two anchors while the key is held
     public static int maxWaitTicks = 10;    // how long to wait for the server before giving up
     public static boolean requireOffhandTotem = true; // never detonate without a totem in the offhand
+    public static int minHealth = 0;        // refuse to blow an anchor below this many hearts (0 = off)
+    public static boolean chainEnabled = true; // holding the key keeps going with the next anchor
+    public static int maxChain = 0;         // stop the chain after this many anchors (0 = unlimited)
+    public static boolean messages = true;  // action-bar messages
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -26,6 +30,10 @@ public final class AnchorConfig {
         int chainGapTicks = 4;
         int maxWaitTicks = 10;
         boolean requireOffhandTotem = true;
+        int minHealth = 0;
+        boolean chainEnabled = true;
+        int maxChain = 0;
+        boolean messages = true;
     }
 
     private AnchorConfig() {}
@@ -58,6 +66,10 @@ public final class AnchorConfig {
             chainGapTicks = clamp(d.chainGapTicks, 0, 40);
             maxWaitTicks = clamp(d.maxWaitTicks, 3, 60);
             requireOffhandTotem = d.requireOffhandTotem;
+            minHealth = clamp(d.minHealth, 0, 20);
+            chainEnabled = d.chainEnabled;
+            maxChain = clamp(d.maxChain, 0, 50);
+            messages = d.messages;
         } catch (Exception ignored) {
             // keep defaults if the file is broken
         }
@@ -70,6 +82,10 @@ public final class AnchorConfig {
         d.chainGapTicks = chainGapTicks;
         d.maxWaitTicks = maxWaitTicks;
         d.requireOffhandTotem = requireOffhandTotem;
+        d.minHealth = minHealth;
+        d.chainEnabled = chainEnabled;
+        d.maxChain = maxChain;
+        d.messages = messages;
         try {
             Path p = path();
             Files.createDirectories(p.getParent());

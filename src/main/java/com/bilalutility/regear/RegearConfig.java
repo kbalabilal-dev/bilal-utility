@@ -23,6 +23,9 @@ public final class RegearConfig {
     public static int clickDelayTicks = 3;          // pause between two clicks
     public static int waitTicks = 40;               // how long to wait for a menu / purchase message
     public static int hudPos = 1;                   // 0 = off, 1 = top center, 2 = top left, 3 = top right
+    public static int hudScale = 100;               // progress box size in percent
+    public static int hudX = 0, hudY = 0;           // progress box offset in pixels
+    public static String activeKit = "";            // name of the kit that was loaded last (see RegearKits)
 
     // ---- sorting and totems ----
     public static boolean sortEnabled = true;       // arrange hotbar + offhand after buying
@@ -65,6 +68,9 @@ public final class RegearConfig {
         int clickDelayTicks = 3;
         int waitTicks = 40;
         int hudPos = 1;
+        int hudScale = 100;
+        int hudX = 0, hudY = 0;
+        String activeKit = "";
         boolean sortEnabled = true;
         boolean fillTotems = false;
         boolean debug = false;
@@ -146,6 +152,10 @@ public final class RegearConfig {
             clickDelayTicks = clamp(d.clickDelayTicks, 1, 40);
             waitTicks = clamp(d.waitTicks, 10, 200);
             hudPos = clamp(d.hudPos, 0, 3);
+            hudScale = d.hudScale <= 0 ? 100 : clamp(d.hudScale, 50, 200);
+            hudX = clamp(d.hudX, -600, 600);
+            hudY = clamp(d.hudY, -600, 600);
+            activeKit = d.activeKit == null ? "" : d.activeKit;
             sortEnabled = d.sortEnabled;
             fillTotems = d.fillTotems;
             debug = d.debug;
@@ -187,6 +197,10 @@ public final class RegearConfig {
         d.clickDelayTicks = clickDelayTicks;
         d.waitTicks = waitTicks;
         d.hudPos = hudPos;
+        d.hudScale = hudScale;
+        d.hudX = hudX;
+        d.hudY = hudY;
+        d.activeKit = activeKit;
         d.sortEnabled = sortEnabled;
         d.fillTotems = fillTotems;
         d.debug = debug;
