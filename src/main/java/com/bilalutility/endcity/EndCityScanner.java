@@ -4,6 +4,7 @@ import com.bilalutility.mixin.EndCityShipPieceAccessor;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.registry.DynamicRegistryManager;
+import net.minecraft.registry.RegistryLoader;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryKeys;
@@ -77,11 +78,11 @@ public final class EndCityScanner {
     public static synchronized boolean start(MinecraftClient client, long seed, int centerX, int centerZ,
                                              int radius, int ignoreSpawnRadius) {
         if (isRunning()) return false;
-        // Structure validation requires a live world's dynamic registries (including bound tags).
-        // Never fall back to DynamicRegistryManager.EMPTY: that fails later with "tags not bound".
-        if (client == null || client.world == null) {
+        // Scanning uses a separately loaded vanilla data-pack registry set, so a world
+        // does not need to be open. Only the client executor/config environment is required.
+        if (client == null) {
             state = State.ERROR;
-            error = "No world is loaded. Join a world before starting an End City scan.";
+            error = "Minecraft client is not available.";
             status = error;
             return false;
         }
@@ -94,11 +95,9 @@ public final class EndCityScanner {
         total = 0;
         results = List.of();
 
-        // Capture client-owned references on the render thread, but do all filesystem,
-        // data-pack and world-generation preparation on the worker.
-        // The client world's manager is the registry view associated with the currently loaded
-        // dimension and its datapack/tag bindings. Capture it on the client thread.
-        DynamicRegistryManager registryManager = client.world.getRegistryManager();
+        // Capture only the data fixer on the client thread. Client-synced registries are
+        // intentionally NOT used: they omit server-only worldgen registries such as
+        // minecraft:world/noise_settings.
         com.mojang.datafixers.DataFixer dataFixer = client.getDataFixer();
 
         try {
@@ -120,6 +119,26 @@ public final class EndCityScanner {
 
                 StructureTemplateManager templateManager = new StructureTemplateManager(
                         dataResourceManager, templateSession, dataFixer, Registries.BLOCK);
+
+                // Build the same complete vanilla registry graph used by world loading.
+                // DYNAMIC_REGISTRIES contains worldgen settings (noise parameters, biomes,
+                // structures, structure sets, etc.); DIMENSION_REGISTRIES contains dimension
+                // data such as minecraft:world/noise_settings. Both phases are loaded from the
+                // vanilla server-data pack with bound tags instead of the partial client sync.
+                List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
+                Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry.getReadOnlyWrapper()));
+
+                List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
+                registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
+                registryEntries.addAll(RegistryLoader.DIMENSION_REGISTRIES);
+
+                DynamicRegistryManager.Immutable registryManager = RegistryLoader.loadFromResource(
+                        dataResourceManager, staticRegistries, registryEntries);
+
+                // Fail early with a useful message if the requested vanilla data is incomplete.
+                registryManager.getOrThrow(RegistryKeys.NOISE_PARAMETERS);
+                registryManager.getOrThrow(RegistryKeys.CHUNK_GENERATOR_SETTINGS);
+                registryManager.getOrThrow(RegistryKeys.STRUCTURE_SET);
 
                 scan(seed, centerX, centerZ, radius, ignoreSpawnRadius, registryManager, templateManager);
             } catch (Throwable throwable) {
