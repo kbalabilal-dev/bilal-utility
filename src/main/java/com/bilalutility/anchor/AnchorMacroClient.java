@@ -259,7 +259,23 @@ public class AnchorMacroClient implements ClientModInitializer {
         }
 
         switch (step) {
-            case 0 -> { // place the anchor
+            case 0 -> { // place the anchor using the current vanilla crosshair hit
+                // The player may have moved or changed aim during the configured place delay.
+                // Reusing the old hit result can send a stale interaction that the server rejects.
+                if (!(client.crosshairTarget instanceof BlockHitResult currentHit)
+                        || currentHit.getType() != HitResult.Type.BLOCK) {
+                    abort(client, "look at a placeable block");
+                    return;
+                }
+
+                BlockPos targetPos = currentHit.getBlockPos().offset(currentHit.getSide());
+                if (!client.world.isInBuildLimit(targetPos)
+                        || !client.world.getBlockState(targetPos).isReplaceable()) {
+                    abort(client, "the space next to that block cannot hold an anchor");
+                    return;
+                }
+
+                placeHit = currentHit;
                 select(client, anchorSlot);
                 client.interactionManager.interactBlock(client.player, Hand.MAIN_HAND, placeHit);
                 client.player.swingHand(Hand.MAIN_HAND);

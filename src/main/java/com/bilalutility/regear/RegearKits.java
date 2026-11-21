@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Premade kits (built in) and your own saved kits (config/regear_kits.json).
+ * User-saved kits (config/regear_kits.json).
  * A kit is what you carry: how many of each item, which item goes in the offhand and in each hotbar slot,
  * and the "fill with totems" switch. Shop slots and menu layout are not part of a kit.
  */
@@ -29,14 +29,12 @@ public final class RegearKits {
         public int[] hotbar = new int[9];
         public int offhand = KitItem.TOTEM.ordinal();
         public boolean fillTotems = false;
-        public transient boolean builtIn = false;
 
         Kit() {
             java.util.Arrays.fill(hotbar, -1);
         }
     }
 
-    private static final List<Kit> PREMADE = new ArrayList<>();
     private static final List<Kit> CUSTOM = new ArrayList<>();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -44,48 +42,15 @@ public final class RegearKits {
         List<Kit> kits = new ArrayList<>();
     }
 
-    static {
-        // amounts are in KitItem order: TOTEM, CRYSTAL, PEARL, OBSIDIAN, ANCHOR, XP, GLOWSTONE, GOLDEN_APPLE
-        PREMADE.add(make("Classic", KitItem.CRYSTAL, new int[]{4, 64, 16, 64, 0, 64, 0, 16},
-                new int[]{-1, 1, 3, 4, 6, 2, 7, 5, 0}, 0, false));
-        PREMADE.add(make("Crystal PvP", KitItem.CRYSTAL, new int[]{6, 128, 16, 64, 0, 64, 0, 32},
-                new int[]{-1, 1, 3, 2, 7, 5, 0, -1, -1}, 0, false));
-        PREMADE.add(make("Anchor PvP", KitItem.ANCHOR, new int[]{8, 0, 16, 0, 32, 32, 64, 32},
-                new int[]{-1, 4, 6, 0, 2, 7, 5, -1, -1}, 0, false));
-        PREMADE.add(make("Hybrid", KitItem.OBSIDIAN, new int[]{8, 64, 16, 64, 16, 32, 32, 32},
-                new int[]{-1, 1, 3, 4, 6, 2, 7, 5, 0}, 0, false));
-        PREMADE.add(make("Light kit", KitItem.GOLDEN_APPLE, new int[]{3, 32, 8, 32, 0, 32, 0, 16},
-                new int[]{-1, 1, 3, 2, 7, 0, -1, -1, -1}, 0, false));
-        PREMADE.add(make("Totem fill", KitItem.TOTEM, new int[]{0, 0, 0, 0, 0, 0, 0, 0},
-                new int[]{-1, -1, -1, -1, -1, -1, -1, -1, -1}, 0, true));
-    }
 
     private RegearKits() {}
-
-    private static Kit make(String name, KitItem icon, int[] amounts, int[] hotbar, int offhand, boolean fill) {
-        Kit k = new Kit();
-        k.name = name;
-        k.icon = icon.ordinal();
-        k.amounts = amounts;
-        k.hotbar = hotbar;
-        k.offhand = offhand;
-        k.fillTotems = fill;
-        k.builtIn = true;
-        return k;
-    }
-
-    public static List<Kit> premade() {
-        return PREMADE;
-    }
 
     public static List<Kit> custom() {
         return CUSTOM;
     }
 
     public static List<Kit> all() {
-        List<Kit> l = new ArrayList<>(PREMADE);
-        l.addAll(CUSTOM);
-        return l;
+        return new ArrayList<>(CUSTOM);
     }
 
     /** A short list of "Item xN" lines for tooltips. */
@@ -154,15 +119,12 @@ public final class RegearKits {
 
     // ---------- your own kits ----------
 
-    /** Letters, numbers, space, - and _ ; 1-16 characters; not the name of a premade kit. */
+    /** Letters, numbers, space, - and _ ; 1-16 characters. */
     public static String cleanName(String raw) {
         if (raw == null) return null;
         String s = raw.trim().replaceAll("\\s+", " ");
         if (s.isEmpty() || s.length() > NAME_MAX) return null;
         if (!s.matches("[A-Za-z0-9 _\\-]+")) return null;
-        for (Kit p : PREMADE) {
-            if (p.name.equalsIgnoreCase(s)) return null;
-        }
         return s;
     }
 

@@ -11,21 +11,21 @@ import net.minecraft.text.Text;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Pick a premade kit or one of your own saved kits. Every card shows the kit's icon, name and items. */
+/** Simple list of saved kits. Scroll to browse, click a kit to load it. */
 public class RegearKitScreen extends BilalScreen {
-    private static final int CARD_H = 44;
-    private static int lastTab = 0;
-
-    private record Card(int x, int y, int w, RegearKits.Kit kit) {}
-
+    private static final int ROW_H = 38;
     private final List<Card> cards = new ArrayList<>();
-    private int tab;
+    private int scroll;
+    private int visibleRows;
+    private int listTop;
+    private int listBottom;
     private TextFieldWidget nameField;
     private ButtonWidget saveBtn;
 
+    private record Card(int x, int y, int w, RegearKits.Kit kit) {}
+
     public RegearKitScreen(Screen parent) {
-        super("Regear kits", "Click a kit to load it into the regear", 0x55FF55, parent);
-        this.tab = lastTab;
+        super("My kits", "Save, load or delete your own regear setups", 0x55FF55, parent);
     }
 
     @Override
@@ -35,77 +35,78 @@ public class RegearKitScreen extends BilalScreen {
 
     @Override
     protected void build() {
-        lastTab = tab;
         cards.clear();
         int left = panelLeft() + 12;
         int inner = panelW() - 24;
-        int y = contentTop();
+        listTop = contentTop() + 4;
+        listBottom = height - 91;
+        visibleRows = Math.max(1, (listBottom - listTop) / ROW_H);
 
-        int tw = (inner - 3) / 2;
-        String[] tabs = {"Premade kits", "My kits (" + RegearKits.custom().size() + ")"};
-        for (int i = 0; i < 2; i++) {
-            int idx = i;
-            ButtonWidget b = button(tabs[i], left + i * (tw + 3), y, tw, () -> {
-                tab = idx;
-                clearAndInit();
-            }, null);
-            b.active = i != tab;
-        }
+        List<RegearKits.Kit> kits = RegearKits.custom();
+        int maxScroll = Math.max(0, kits.size() - visibleRows);
+        scroll = Math.max(0, Math.min(scroll, maxScroll));
 
-        int gridTop = y + 28;
-        int cw = (inner - 4) / 2;
-        List<RegearKits.Kit> kits = tab == 0 ? RegearKits.premade() : RegearKits.custom();
-        for (int i = 0; i < kits.size(); i++) {
+        for (int i = scroll; i < Math.min(kits.size(), scroll + visibleRows); i++) {
             RegearKits.Kit kit = kits.get(i);
-            int cx = left + (i % 2) * (cw + 4);
-            int cy = gridTop + (i / 2) * (CARD_H + 4);
-            boolean custom = !kit.builtIn;
-            int bw = custom ? cw - 16 : cw;
-            buttonSized("", cx, cy, bw, CARD_H, () -> {
+            int y = listTop + (i - scroll) * ROW_H;
+            int w = inner - 22;
+            buttonSized("", left, y, w, 34, () -> {
                 RegearKits.apply(kit);
-                if (client.player != null) client.player.sendMessage(Text.literal("Regear kit: " + kit.name), true);
+                if (client.player != null) client.player.sendMessage(Text.literal("Loaded kit: " + kit.name), true);
             }, RegearKits.summary(kit));
-            if (custom) {
-                buttonSized("x", cx + cw - 14, cy, 14, CARD_H, () -> {
-                    RegearKits.delete(kit.name);
-                    clearAndInit();
-                }, "Delete this kit");
+            buttonSized("×", left + w + 3, y, 19, 34, () -> {
+                RegearKits.delete(kit.name);
+                scroll = Math.min(scroll, Math.max(0, RegearKits.custom().size() - visibleRows));
+                clearAndInit();
+            }, "Delete kit");
+            cards.add(new Card(left, y, w, kit));
+        }
+
+        if (kits.isEmpty()) {
+            centered("No saved kits yet.", listTop + 18, 0xFFAAAAAA);
+            centered("Edit your setup, then save it below.", listTop + 33, 0xFF888899);
+        }
+
+        int ry = height - 56;
+        String old = nameField != null ? nameField.getText() : "";
+        nameField = new TextFieldWidget(textRenderer, left, ry, inner - 110, 20, Text.literal("Kit name"));
+        nameField.setMaxLength(RegearKits.NAME_MAX);
+        nameField.setText(old);
+        nameField.setChangedListener(s -> {
+            if (saveBtn != null) saveBtn.active = RegearKits.canSave(s);
+        });
+        addDrawableChild(nameField);
+        saveBtn = button("Save", left + inner - 106, ry, 106, () -> {
+            if (RegearKits.saveCurrent(nameField.getText())) {
+                nameField.setText("");
+                clearAndInit();
             }
-            cards.add(new Card(cx, cy, bw, kit));
-        }
-        if (tab == 1 && kits.isEmpty()) {
-            centered("No saved kits yet.", gridTop + 10, 0xFFAAAAAA);
-            centered("Set up your items, type a name below and press Save current.", gridTop + 24, 0xFF888899);
-        }
+        }, "Save the current item amounts and hotbar layout");
+        saveBtn.active = RegearKits.canSave(old);
 
-        if (tab == 1) {
-            int ry = height - 56;
-            String old = nameField != null ? nameField.getText() : "";
-            nameField = new TextFieldWidget(textRenderer, left, ry, inner - 110, 20, Text.literal("Kit name"));
-            nameField.setMaxLength(RegearKits.NAME_MAX);
-            nameField.setText(old);
-            nameField.setChangedListener(s -> saveBtn.active = RegearKits.canSave(s));
-            addDrawableChild(nameField);
-            saveBtn = button("Save current", left + inner - 106, ry, 106, () -> {
-                if (RegearKits.saveCurrent(nameField.getText())) {
-                    nameField.setText("");
-                    clearAndInit();
-                }
-            }, "Saves your current amounts, hotbar and offhand under this name (same name = overwrite)");
-            saveBtn.active = RegearKits.canSave(old);
-        } else {
-            setHint("Premade kits only change what you carry. Shop slots stay as they are.");
-        }
-
-        int fy = height - 30;
-        button("Edit items...", left, fy, 100, () -> client.setScreen(new RegearKitEditScreen(this)),
-                "Amounts and shop slot of every item");
-        button("Done", centerX() - 50, fy, 100, this::close, null);
-        ButtonWidget buy = button("Buy now", left + inner - 100, fy, 100, () -> {
+        button("Edit items", left, height - 30, 90, () -> client.setScreen(new RegearKitEditScreen(this)),
+                "Configure item amounts and hotbar slots");
+        button("Done", centerX() - 45, height - 30, 90, this::close, null);
+        ButtonWidget buy = button("Buy now", left + inner - 90, height - 30, 90, () -> {
             client.setScreen(null);
             RegearRunner.start(client);
-        }, "Close this screen and buy the loaded kit");
+        }, "Run regear with the current setup");
         buy.active = client != null && client.world != null;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (mouseX >= panelLeft() && mouseX <= panelRight()
+                && mouseY >= listTop && mouseY <= listBottom) {
+            int max = Math.max(0, RegearKits.custom().size() - visibleRows);
+            int next = Math.max(0, Math.min(max, scroll - (int) Math.signum(verticalAmount)));
+            if (next != scroll) {
+                scroll = next;
+                clearAndInit();
+            }
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     @Override
@@ -114,24 +115,31 @@ public class RegearKitScreen extends BilalScreen {
         for (Card c : cards) {
             RegearKits.Kit k = c.kit();
             boolean active = k.name.equalsIgnoreCase(RegearConfig.activeKit);
-            int color = active ? 0xFF55FF55 : 0xFFFFFFFF;
-            ctx.drawItem(KitItem.values()[k.icon].item.getDefaultStack(), c.x() + 6, c.y() + 5);
-            ctx.drawTextWithShadow(textRenderer, k.name, c.x() + 28, c.y() + 9, color);
+            ctx.drawItem(KitItem.values()[k.icon].item.getDefaultStack(), c.x() + 7, c.y() + 8);
+            ctx.drawTextWithShadow(textRenderer, k.name, c.x() + 30, c.y() + 5,
+                    active ? 0xFF55FF55 : 0xFFFFFFFF);
             if (active) {
-                ctx.drawTextWithShadow(textRenderer, "ACTIVE", c.x() + c.w() - 6 - textRenderer.getWidth("ACTIVE"),
-                        c.y() + 9, 0xFF55FF55);
-                box(ctx, c.x(), c.y(), c.x() + c.w(), c.y() + CARD_H, 0x2255FF55, 0xFF55FF55);
+                ctx.drawTextWithShadow(textRenderer, "ACTIVE", c.x() + c.w() - 48, c.y() + 5, 0xFF55FF55);
+                box(ctx, c.x(), c.y(), c.x() + c.w(), c.y() + 34, 0x2255FF55, 0xFF55FF55);
             }
-            int ix = c.x() + 6;
+            int ix = c.x() + 30;
             for (KitItem it : KitItem.values()) {
                 if (k.amounts[it.ordinal()] <= 0) continue;
-                ItemStack st = it.item.getDefaultStack();
-                ctx.drawItem(st, ix, c.y() + 25);
+                ctx.drawItem(it.item.getDefaultStack(), ix, c.y() + 17);
                 ix += 17;
             }
-            if (k.fillTotems) {
-                ctx.drawItem(KitItem.TOTEM.item.getDefaultStack(), ix, c.y() + 25);
-            }
+            if (k.fillTotems) ctx.drawItem(KitItem.TOTEM.item.getDefaultStack(), ix, c.y() + 17);
+        }
+
+        int total = RegearKits.custom().size();
+        if (total > visibleRows) {
+            int trackX = panelRight() - 8;
+            int trackH = listBottom - listTop;
+            ctx.fill(trackX, listTop, trackX + 3, listBottom, 0xFF343440);
+            int thumbH = Math.max(12, trackH * visibleRows / total);
+            int max = total - visibleRows;
+            int thumbY = listTop + (trackH - thumbH) * scroll / max;
+            ctx.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, 0xFF55FF55);
         }
     }
 }

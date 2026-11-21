@@ -22,16 +22,17 @@ public class TpaHereScreen extends BilalScreen {
     private static boolean autoRepeat = false;
 
     private TextFieldWidget search;
-    private ButtonWidget prev, next, multiBtn, sendBtn, selPageBtn, selAllBtn, selPinBtn, autoBtn, pinBtn;
+    private ButtonWidget prev, next, multiBtn, sendBtn, selPageBtn, selAllBtn, autoBtn;
     private final List<ButtonWidget> playerButtons = new ArrayList<>();
     private final Set<String> selected = new LinkedHashSet<>();
     private List<String> filtered = List.of();   // players matching the search
     private List<String> pageNames = List.of();  // players shown on this page
     private int page = 0;
     private int top;
+    private int maxPage;
+    private int perPage = 1;
     private boolean empty = false;
     private boolean multi = false;
-    private boolean pinMode = false;
 
     public TpaHereScreen() {
         super("TPAHere", "Tap a player to send /" + TpaConfig.command, 0x3FA9FF, null);
@@ -63,10 +64,6 @@ public class TpaHereScreen extends BilalScreen {
             if (!multi) selected.clear();
             rebuild();
         }, "Select several players and send them as a queue");
-        pinBtn = toggleButton(left + 256, y, 60, "Pin", () -> pinMode, () -> {
-            pinMode = !pinMode;
-            rebuild();
-        }, "While ON, tapping a player pins or unpins them (pinned players are listed first)");
 
         selPageBtn = button("Select page", left + 1, height - 78, 100, () -> {
             List<String> l = selectable(pageNames);
@@ -78,12 +75,6 @@ public class TpaHereScreen extends BilalScreen {
             if (allSelected(l)) selected.removeAll(l); else selected.addAll(l);
             rebuild();
         }, null);
-        selPinBtn = button("Pinned", left + 215, height - 78, 100, () -> {
-            for (String n : TpaConfig.pinnedList()) {
-                if (!TpaConfig.isSkipped(n) && TpaQueue.onlineNames(client, "").contains(n)) selected.add(n);
-            }
-            rebuild();
-        }, "Select every pinned player that is online");
 
         autoBtn = button(autoLabel(), left + 1, height - 54, 84, () -> {
             autoRepeat = !autoRepeat;
@@ -128,7 +119,6 @@ public class TpaHereScreen extends BilalScreen {
     private Text nameLabel(String name) {
         if (TpaConfig.isSkipped(name)) return Text.literal(name).formatted(Formatting.RED);
         if (selected.contains(name)) return Text.literal("\u2714 " + name).formatted(Formatting.GREEN);
-        if (TpaConfig.isPinned(name)) return Text.literal("\u2605 " + name).formatted(Formatting.GOLD);
         return Text.literal(name);
     }
 
@@ -147,18 +137,13 @@ public class TpaHereScreen extends BilalScreen {
 
         selected.removeIf(TpaConfig::isSkipped);
 
-        // pinned players first, then the rest, both sorted by name
-        List<String> all = new ArrayList<>(TpaQueue.onlineNames(client, search.getText()));
-        List<String> ordered = new ArrayList<>();
-        for (String n : all) if (TpaConfig.isPinned(n)) ordered.add(n);
-        for (String n : all) if (!TpaConfig.isPinned(n)) ordered.add(n);
-        filtered = ordered;
+        filtered = new ArrayList<>(TpaQueue.onlineNames(client, search.getText()));
         empty = filtered.isEmpty();
 
         int reserved = multi ? RESERVED_MULTI : RESERVED_SINGLE;
         int rows = Math.max(1, (height - top - reserved) / ROW_H);
-        int perPage = rows * 3;
-        int maxPage = Math.max(0, (filtered.size() - 1) / perPage);
+        perPage = rows * 3;
+        maxPage = Math.max(0, (filtered.size() - 1) / perPage);
         page = MathHelper.clamp(page, 0, maxPage);
 
         int x0 = panelLeft() + 13;
@@ -170,11 +155,7 @@ public class TpaHereScreen extends BilalScreen {
             String name = filtered.get(i);
             int idx = i - start;
             ButtonWidget b = ButtonWidget.builder(nameLabel(name), btn -> {
-                        if (pinMode) {
-                            TpaConfig.setPinned(name, !TpaConfig.isPinned(name));
-                            TpaConfig.save();
-                            rebuild();
-                        } else if (multi) {
+                        if (multi) {
                             if (!selected.remove(name)) selected.add(name);
                             btn.setMessage(nameLabel(name));
                             updateButtons();
@@ -184,7 +165,7 @@ public class TpaHereScreen extends BilalScreen {
                     })
                     .dimensions(x0 + (idx % 3) * 104, top + (idx / 3) * ROW_H, 102, 20).build();
             // Skip-list players can't be selected for the queue (but a single tap still sends).
-            b.active = !(multi && !pinMode && TpaConfig.isSkipped(name));
+            b.active = !(multi && TpaConfig.isSkipped(name));
             playerButtons.add(b);
             addDrawableChild(b);
         }
@@ -196,7 +177,6 @@ public class TpaHereScreen extends BilalScreen {
     private void updateButtons() {
         selPageBtn.visible = multi;
         selAllBtn.visible = multi;
-        selPinBtn.visible = multi;
         autoBtn.visible = multi;
         sendBtn.visible = multi;
 
@@ -206,9 +186,24 @@ public class TpaHereScreen extends BilalScreen {
         selAllBtn.setMessage(Text.literal(allSelected(selAll) ? "Unselect all" : "Select all"));
         selPageBtn.active = !selPage.isEmpty();
         selAllBtn.active = !selAll.isEmpty();
-        selPinBtn.active = !TpaConfig.pinnedList().isEmpty();
         sendBtn.setMessage(Text.literal(sendLabel()));
         sendBtn.active = !selected.isEmpty();
+    }
+
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        int listBottom = height - (multi ? RESERVED_MULTI : RESERVED_SINGLE);
+        if (mouseX >= panelLeft() && mouseX <= panelRight()
+                && mouseY >= top && mouseY <= listBottom && maxPage > 0) {
+            int nextPage = MathHelper.clamp(page - (int) Math.signum(verticalAmount), 0, maxPage);
+            if (nextPage != page) {
+                page = nextPage;
+                rebuild();
+            }
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     private void send(String name) {
@@ -233,6 +228,16 @@ public class TpaHereScreen extends BilalScreen {
         super.render(context, mouseX, mouseY, delta);
         if (empty) {
             context.drawCenteredTextWithShadow(textRenderer, Text.literal("No players found"), width / 2, top + 10, 0xFFAAAAAA);
+        }
+        if (maxPage > 0) {
+            int trackX = panelRight() - 7;
+            int trackTop = top;
+            int trackBottom = height - (multi ? RESERVED_MULTI : RESERVED_SINGLE);
+            int trackHeight = Math.max(1, trackBottom - trackTop);
+            int thumbHeight = Math.max(12, trackHeight / (maxPage + 1));
+            int thumbY = trackTop + (trackHeight - thumbHeight) * page / maxPage;
+            context.fill(trackX, trackTop, trackX + 3, trackBottom, 0xFF343440);
+            context.fill(trackX, thumbY, trackX + 3, thumbY + thumbHeight, 0xFF3FA9FF);
         }
     }
 }
