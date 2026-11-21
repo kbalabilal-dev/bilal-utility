@@ -126,7 +126,7 @@ public final class EndCityScanner {
                 // data such as minecraft:world/noise_settings. Both phases are loaded from the
                 // vanilla server-data pack with bound tags instead of the partial client sync.
                 List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
-                Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry.getReadOnlyWrapper()));
+                Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry));
 
                 List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
                 registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
