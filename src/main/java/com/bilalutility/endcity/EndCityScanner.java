@@ -9,6 +9,7 @@ import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.RegistryWrapper;
+import net.minecraft.registry.tag.TagGroupLoader;
 import net.minecraft.resource.LifecycledResourceManagerImpl;
 import net.minecraft.resource.ResourcePackManager;
 import net.minecraft.resource.ResourceType;
@@ -547,8 +548,9 @@ public final class EndCityScanner {
             StructureTemplateManager templateManager = new StructureTemplateManager(
                     dataResourceManager, templateSession, dataFixer, Registries.BLOCK);
 
-            List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
-            Registries.REGISTRIES.forEach(registry -> staticRegistries.add(registry.getReadOnlyWrapper()));
+            // Same call vanilla's SaveLoading uses: static registries with their tags bound from the data pack.
+            List<RegistryWrapper.Impl<?>> staticRegistries = TagGroupLoader.startReload(
+                    dataResourceManager, DynamicRegistryManager.of(Registries.REGISTRIES));
             List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
             registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
             registryEntries.addAll(RegistryLoader.DIMENSION_REGISTRIES);
