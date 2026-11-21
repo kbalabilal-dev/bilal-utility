@@ -549,8 +549,11 @@ public final class EndCityScanner {
                     dataResourceManager, templateSession, dataFixer, Registries.BLOCK);
 
             // Same call vanilla's SaveLoading uses: static registries with their tags bound from the data pack.
-            List<RegistryWrapper.Impl<?>> staticRegistries = TagGroupLoader.startReload(
-                    dataResourceManager, DynamicRegistryManager.of(Registries.REGISTRIES));
+            List<RegistryWrapper.Impl<?>> staticRegistries = new ArrayList<>();
+            for (var pendingTags : TagGroupLoader.startReload(
+                    dataResourceManager, DynamicRegistryManager.of(Registries.REGISTRIES))) {
+                staticRegistries.add(pendingTags.getLookup());   // lookup with tags loaded; apply() is NOT called
+            }
             List<RegistryLoader.Entry<?>> registryEntries = new ArrayList<>();
             registryEntries.addAll(RegistryLoader.DYNAMIC_REGISTRIES);
             registryEntries.addAll(RegistryLoader.DIMENSION_REGISTRIES);
